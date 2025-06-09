@@ -98,4 +98,64 @@ def order_processor(image):
     return ingredient_count
 
 
+def split_order_items(order_image):
+    """
+    Split order board image into individual item images by detecting plus signs.
+    Returns array of sub-images for each item section.
+    """
+    # Read the plus sign template
+    plus_template = cv2.imread('images/plus.png')
+    if plus_template is None:
+        raise FileNotFoundError("Could not load plus.png template")
+    
+    # Convert images to grayscale for template matching
+    gray_image = cv2.cvtColor(order_image, cv2.COLOR_BGR2GRAY)
+    gray_template = cv2.cvtColor(plus_template, cv2.COLOR_BGR2GRAY)
+    
+    # Perform template matching
+    result = cv2.matchTemplate(gray_image, gray_template, cv2.TM_CCOEFF_NORMED)
+    
+    # Find locations where template matches with high confidence
+    threshold = 0.8
+    locations = np.where(result >= threshold)
+    plus_positions = list(zip(*locations[::-1]))  # Convert to (x,y) coordinates
+    
+    # Sort plus signs by x coordinate to process left to right
+    plus_positions.sort(key=lambda x: x[0])
+    
+    # Calculate item section size (4x template width as per docstring)
+    template_w = plus_template.shape[1]
+    section_size = template_w * 4
+    
+    # Extract item sections
+    item_sections = []
+    prev_x = 0
+    
+    for x, y in plus_positions:
+        if x - prev_x > section_size:  # New section found
+            # Extract region before the plus sign
+            section = order_image[y-section_size:y+section_size, x-(2*section_size):x]
+            if section.size > 0:  # Ensure valid section
+                item_sections.append(section)
+        prev_x = x
+    
+    # Add final section after last plus sign
+    if plus_positions:
+        last_x = plus_positions[-1][0]
+        final_section = order_image[y-section_size:y+section_size, last_x+template_w:last_x+template_w+(2*section_size)]
+        if final_section.size > 0:
+            item_sections.append(final_section)
+    
+    else:
+        # [There is no plus sign identified]. There should therefore be only one item on the 
+        # order board. Just set the selection to be a middle of the order board that is 3x sectionsize by 3x section size.
+        height, width = order_image.shape[:2]
+        center_x = width // 2
+        center_y = height // 2
+        start_x = max(center_x - section_size, 0)
+        start_y = max(center_y - section_size, 0)
+        final_section = order_image[start_y+(0.7*section_size):start_y + (2*section_size), start_x:start_x + (2*section_size)]
+        if final_section.size > 0:
+            item_sections.append(final_section)
 
+    return item_sections
