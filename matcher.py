@@ -39,13 +39,17 @@ class ImageMatcher:
         self.identify_button = ttk.Button(self.main_frame, text="Identify", command=self.identify_image, state='disabled')
         self.identify_button.grid(row=1, column=0, pady=5)
         
-        # Create result label
+        # Create canvas for relevant section display
+        self.relevant_canvas = tk.Canvas(self.main_frame, width=400, height=100, bg='white')
+        self.relevant_canvas.grid(row=2, column=0, pady=5)
+        
+        # Create result label (move to row 3)
         self.result_label = ttk.Label(self.main_frame, text="")
-        self.result_label.grid(row=2, column=0, pady=5)
+        self.result_label.grid(row=3, column=0, pady=5)
 
-        # Create frame for sub-images
+        # Create frame for sub-images (move to row 4)
         self.sections_frame = ttk.Frame(self.main_frame)
-        self.sections_frame.grid(row=3, column=0, pady=10)
+        self.sections_frame.grid(row=4, column=0, pady=10)
         
         # Create label for sections heading
         self.sections_label = ttk.Label(self.sections_frame, text="Relevant sections:")
@@ -103,6 +107,22 @@ class ImageMatcher:
         
         # Extract the relevant portion
         relevant_portion = self.current_image[y1:y2, x1:x2]
+
+        # Display relevant portion
+        relevant_rgb = cv2.cvtColor(relevant_portion, cv2.COLOR_BGR2RGB)
+        relevant_pil = Image.fromarray(relevant_rgb)
+        
+        # Resize to fit canvas width while maintaining aspect ratio
+        aspect_ratio = relevant_portion.shape[0] / relevant_portion.shape[1]
+        new_width = 400
+        new_height = int(new_width * aspect_ratio)
+        relevant_pil = relevant_pil.resize((new_width, new_height), Image.LANCZOS)
+        
+        # Store and display relevant section
+        self.relevant_photo = ImageTk.PhotoImage(relevant_pil)
+        self.relevant_canvas.config(height=new_height)
+        self.relevant_canvas.delete("all")
+        self.relevant_canvas.create_image(new_width//2, new_height//2, image=self.relevant_photo, anchor='center')
 
         # Clear previous sub-images
         for widget in self.sections_frame.winfo_children():
