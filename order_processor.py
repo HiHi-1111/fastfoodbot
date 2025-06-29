@@ -75,6 +75,23 @@ def identify_ingredient(image):
     if brown>=0.25*total_rel:
         return 4
     return -1
+    
+def are_we_in_an_order(image):
+    red, green, blue = 101, 175, 74
+    x_start, y_start = 2468, 827
+    x_end, y_end = 2524, 883
+    green_count = 0
+    total_pxls = (y_end - y_start) * (x_end - x_start)
+    
+    # Fix: Properly iterate over 2D array slice
+    region = image[y_start:y_end, x_start:x_end]
+    for row in region:
+        for px in row:
+            if px[0] == red and px[1] == green and px[2] == blue:
+                green_count += 1
+    
+    print(f"Green count: {green_count}, total pxls: {total_pxls}")
+    return green_count > 0.5*total_pxls
 
 # Input: 
 # - a picture array (2d array) of an order

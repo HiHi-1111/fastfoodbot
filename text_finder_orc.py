@@ -5,6 +5,7 @@ from PIL import Image, ImageEnhance
 import re
 from typing import Tuple, Optional, List, Dict
 import json
+from order_processor import are_we_in_an_order
 
 class RobloxDialogOCR:
 	def __init__(self, config_path: Optional[str] = None):
@@ -23,7 +24,6 @@ class RobloxDialogOCR:
 		}
 		
 		# Load custom region if config provided
-		print("st - 0.01")
 		if config_path:
 			self.load_config(config_path)
 		else:
@@ -60,10 +60,8 @@ class RobloxDialogOCR:
 		Returns:
 			Cropped dialog region
 		"""
-		print("st - 0.2")
 		height, width = image.shape[:2]
 		
-		print("st - 0.3")
 		# Ensure coordinates are within image bounds
 		x = max(0, min(self.dialog_region['x'], width - 1))
 		y = max(0, min(self.dialog_region['y'], height - 1))
@@ -80,7 +78,6 @@ class RobloxDialogOCR:
 		# pil_image.show()
 
 
-		print("st - 0.4")
 		return dialog_crop
 	
 	def auto_detect_dialog_region(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
@@ -302,7 +299,6 @@ class RobloxDialogOCR:
 					'text': '',
 					'confidence': 0
 				}
-			print("st - 0.1")
 
 			# Extract dialog region
 			if auto_detect:
@@ -315,8 +311,11 @@ class RobloxDialogOCR:
 					dialog_region = self.extract_dialog_region(image)
 			else:
 				dialog_region = self.extract_dialog_region(image)
+				# # display the dialog region in a gui..
+				# cv2.imshow('Dialog Region', dialog_region)
+				# cv2.waitKey(0)
+				# cv2.destroyAllWindows()
 			
-			print("st-2")
 			
 			# Preprocess the dialog region
 			processed_image = self.preprocess_dialog_image(dialog_region)
@@ -324,7 +323,7 @@ class RobloxDialogOCR:
 			# Enhance contrast
 			enhanced_image = self.enhance_text_contrast(processed_image)
 			
-			# Extract text using multiple methods
+			# Extract text using multiple methog
 			ocr_results = self.extract_text_multiple_methods(enhanced_image)
 			
 			# Select best result
@@ -381,8 +380,7 @@ class RobloxDialogOCR:
 
 def main():
 	ocr = RobloxDialogOCR('dialog_config_4.json')
-	screenshot_path = 'roblox_screenshot_3.png'
-	print("st 1")
+	screenshot_path = 'roblox_ss_4.png'
 	result = ocr.read_dialog_text(screenshot_path)
 	
 	if result['success']:
@@ -394,27 +392,46 @@ def main():
 	# Calibration helper (uncomment to use)
 	# ocr.calibrate_dialog_region(screenshot_path)
 
-def is_this_phase_2_or_3(image: np.ndarray) -> bool:
-    ocr = RobloxDialogOCR('dialog_config_2.json')
-    result = ocr.read_dialog_text_from_array(image)
-    if result['success']:
-        if result['text'] == 'With...':
-            return 2
-        elif result['text'] == 'And a...':
-            return 3
-    return 0
+def is_this_phase_2_or_3(image: np.ndarray) -> int:
+	print("now in phase 2/3 check....")
+	ocr = RobloxDialogOCR('dialog_config_2.json')
+	result = ocr.read_dialog_text_from_array(image)
+	if result['success']:
+		print("Read this: ", result['text'])
+	
+	print("about to exit phase 2/3 check...")
+	if result['text'] == 'With...':
+		return 2
+	elif result['text'] == 'And a...':
+		return 3
+	return 0
 
 def is_this_phase_4(image: np.ndarray) -> bool:
-    ocr = RobloxDialogOCR('dialog_config_4.json')
-    result = ocr.read_dialog_text_from_array(image)
-    if result['success']:
-        return result['text'] == 'Canyourepeat?'
-    return False
+	print("now in phase 4 check function....")
+# # "dialog_region": {
+# #     "x": 1086,
+# #     "y": 1342,
+# # 	  "height": 50,
+# # 		"width": 380
+# 	cv2.imshow('Dialog Region', image[1342:1392, 1086:1466])
+# 	cv2.waitKey(10000)
+# 	cv2.destroyAllWindows()
+	
+	ocr = RobloxDialogOCR('dialog_config_4.json')
+	result = ocr.read_dialog_text_from_array(image)
+
+	print("now about to exit phase 4 check....")
+	if result['success']:
+		return 'Canyourepeat?' in result['text']
+	return False
 
 def get_current_phase(image: np.ndarray) -> int:
+	if not are_we_in_an_order(image):
+		return 0
 	if is_this_phase_4(image):
 		return 4
 	phase_2_or_3 = is_this_phase_2_or_3(image)
+	print("now about to return 2/3/1...")
 	if (phase_2_or_3):
 		return phase_2_or_3
 	return 1
