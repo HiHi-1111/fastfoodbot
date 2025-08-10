@@ -174,5 +174,7 @@ def split_order_items(order_image):
         final_section = order_image[start_y+(0.7*section_size):start_y + (2*section_size), start_x:start_x + (2*section_size)]
         if final_section.size > 0:
             item_sections.append(final_section)
+    
+    print("Identified this many items: ", len(item_sections))
 
     return item_sections

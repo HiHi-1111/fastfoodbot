@@ -38,6 +38,13 @@ class FastFoodBot:
         self.screenshot_label.pack(padx=20, pady=10)
         self.tk_screenshot = None  # To keep a reference
 
+        # Add "ingredients to identify" section
+        self.ingredients_frame = tk.Frame(self.gui_root)
+        self.ingredients_frame.pack(padx=20, pady=10)
+        self.ingredients_heading = tk.Label(self.ingredients_frame, text="Ingredients to Identify:", font=("Arial", 12, "bold"))
+        self.ingredients_heading.grid(row=0, column=0, sticky="w")
+        self.ingredient_images = []  # To keep references to PhotoImages
+
     def shutdown(self):
         """Gracefully shutdown the bot"""
         print("\nShutting down Fast Food Bot...")
@@ -80,6 +87,33 @@ class FastFoodBot:
         self.tk_screenshot = ImageTk.PhotoImage(image)
         self.screenshot_label.config(image=self.tk_screenshot)
 
+    def update_ingredients_to_identify(self, item_images):
+        # Clear previous images
+        for widget in self.ingredients_frame.winfo_children():
+            if widget != self.ingredients_heading:
+                widget.destroy()
+        self.ingredient_images.clear()
+
+        # Display new images in a row
+        for i, img in enumerate(item_images):
+            # Convert to PIL Image if needed
+            if isinstance(img, np.ndarray):
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(img)
+            elif not isinstance(img, Image.Image):
+                pil_img = Image.fromarray(np.array(img))
+            else:
+                pil_img = img
+
+            # Resize for display
+            display_size = (80, 80)
+            pil_img = pil_img.resize(display_size, Image.LANCZOS)
+            tk_img = ImageTk.PhotoImage(pil_img)
+            self.ingredient_images.append(tk_img)  # Keep reference
+
+            label = tk.Label(self.ingredients_frame, image=tk_img)
+            label.grid(row=1, column=i, padx=5, pady=2)
+
     def handle_dialog(self, image: np.ndarray):
         # Update screenshot in GUI
         self.update_gui_screenshot(image)
@@ -87,6 +121,8 @@ class FastFoodBot:
         match self.current_state:
             case 0:
                 time.sleep(0.5)
+                # Clear ingredients to identify section
+                self.update_ingredients_to_identify([])
                 return
             case 1:
                 if not self.order_started:
@@ -116,14 +152,16 @@ class FastFoodBot:
                 print("ingredient count:", len(all_items))
                 ingredients_added = False
                 for item in all_items:
-                    item = identify_ingredient(item)  # Note: now passing individual item image
-                    if item > -1:
+                    item_idx = identify_ingredient(item)  # Note: now passing individual item image
+                    if item_idx > -1:
                         # TODO: Use template matching to identify the count instead of just setting to 1.
-                        self.items_in_order[self.items[item]] = 1
+                        self.items_in_order[self.items[item_idx]] = 1
                         ingredients_added = True
 
                 # Update GUI with current ingredients
                 self.update_gui_ingredients()
+                # Update GUI with images of items to identify
+                self.update_ingredients_to_identify(all_items)
 
                 if not ingredients_added:
                     self.select_button("can_you_repeat")
@@ -141,6 +179,7 @@ class FastFoodBot:
                 # Figure out what happens after this.
                 return
             case 2:
+                self.update_ingredients_to_identify([])  # Clear section
                 if not self.order_started:
                     self.select_button("can_you_repeat")
                 else:
@@ -148,12 +187,14 @@ class FastFoodBot:
                     return
                 return
             case 3:
+                self.update_ingredients_to_identify([])  # Clear section
                 if not self.order_started:
                     self.select_button("can_you_repeat")
                 else:
                     # TODO: firgure out the drink size
                     return
             case 4:
+                self.update_ingredients_to_identify([])  # Clear section
                 if not self.order_started:
                     self.select_button("can_you_repeat")
                 else:
