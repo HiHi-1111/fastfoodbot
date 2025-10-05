@@ -4,6 +4,7 @@ from text_finder_orc import get_current_phase
 from order_processor import split_order_items, identify_ingredient
 import time
 import pyautogui
+from mouse import click_left
 import json
 import math
 import threading
@@ -281,7 +282,9 @@ class FastFoodBot:
                 pyautogui.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
             
             # Final click at target location
-            pyautogui.doubleClick(target_x, target_y)
+            # TODO: replace this with a working click function.
+            # pyautogui.doubleClick(target_x, target_y)
+            click_left(target_x, target_y)
             print(f"Selected {ingredient_name} at ({target_x}, {target_y})")
             
         except FileNotFoundError:
