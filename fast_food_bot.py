@@ -4,6 +4,7 @@ from text_finder_orc import get_current_phase
 from order_processor import split_order_items, identify_ingredient
 import time
 import pyautogui
+from mouse import move_mouse, click_left
 import json
 import math
 import threading
@@ -11,11 +12,6 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import signal
 import sys
-import ctypes
-import ctypes.wintypes as wt
-
-if not hasattr(wt, "ULONG_PTR"):
-    wt.ULONG_PTR = ctypes.c_void_p
 
 class FastFoodBot:
     def __init__(self):
@@ -283,10 +279,15 @@ class FastFoodBot:
                 y = (1-t)**2 * current_y + 2*(1-t)*t * (mid_y + curve_offset_y) + t**2 * target_y
                 
                 # Move mouse to calculated position
-                pyautogui.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
+                move_mouse(int(x), int(y))
+                time.sleep(self.step_duraction_alpha)
             
-            # Final click at target location
-            send_double_click(target_x, target_y)
+            # Final click at target location using SendInput-based helper
+            move_mouse(target_x, target_y)
+            time.sleep(0.05)
+            click_left(target_x, target_y, sleep_s=0.02)
+            time.sleep(0.04)
+            click_left(None, None, sleep_s=0.02)
             print(f"Selected {ingredient_name} at ({target_x}, {target_y})")
             
         except FileNotFoundError:
@@ -295,92 +296,6 @@ class FastFoodBot:
             print("Error: Invalid JSON in bot_params.json")
         except Exception as e:
             print(f"Error selecting ingredient {ingredient_name}: {e}")
-
-
-user32 = ctypes.WinDLL("user32", use_last_error=True)
-
-MOUSEEVENTF_MOVE = 0x0001
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
-MOUSEEVENTF_ABSOLUTE = 0x8000
-
-INPUT_MOUSE = 0
-SM_CXSCREEN = 0
-SM_CYSCREEN = 1
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", wt.LONG),
-        ("dy", wt.LONG),
-        ("mouseData", wt.DWORD),
-        ("dwFlags", wt.DWORD),
-        ("time", wt.DWORD),
-        ("dwExtraInfo", wt.ULONG_PTR),
-    ]
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", wt.WORD),
-        ("wScan", wt.WORD),
-        ("dwFlags", wt.DWORD),
-        ("time", wt.DWORD),
-        ("dwExtraInfo", wt.ULONG_PTR),
-    ]
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [
-        ("uMsg", wt.DWORD),
-        ("wParamL", wt.WORD),
-        ("wParamH", wt.WORD),
-    ]
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [
-        ("mi", MOUSEINPUT),
-        ("ki", KEYBDINPUT),
-        ("hi", HARDWAREINPUT),
-    ]
-
-class INPUT(ctypes.Structure):
-    _fields_ = [
-        ("type", wt.DWORD),
-        ("union", INPUT_UNION),
-    ]
-
-get_system_metrics = user32.GetSystemMetrics
-get_system_metrics.argtypes = [ctypes.c_int]
-get_system_metrics.restype = ctypes.c_int
-
-SendInput = user32.SendInput
-SendInput.argtypes = [wt.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
-SendInput.restype = wt.UINT
-
-
-def _norm_coords(x, y):
-    sw = get_system_metrics(SM_CXSCREEN)
-    sh = get_system_metrics(SM_CYSCREEN)
-    nx = int(x * 65535 / max(sw - 1, 1))
-    ny = int(y * 65535 / max(sh - 1, 1))
-    return nx, ny
-
-
-def _send_mouse(flags, x=None, y=None, data=0):
-    if x is not None and y is not None:
-        nx, ny = _norm_coords(x, y)
-        mi = MOUSEINPUT(nx, ny, data, flags | MOUSEEVENTF_ABSOLUTE, 0, None)
-    else:
-        mi = MOUSEINPUT(0, 0, data, flags, 0, None)
-    inp = INPUT(INPUT_MOUSE, INPUT_UNION(mi=mi))
-    if SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
-        raise ctypes.WinError(ctypes.get_last_error())
-
-
-def send_double_click(x, y):
-    _send_mouse(MOUSEEVENTF_MOVE, x, y)
-    _send_mouse(MOUSEEVENTF_LEFTDOWN, x, y)
-    _send_mouse(MOUSEEVENTF_LEFTUP, x, y)
-    _send_mouse(MOUSEEVENTF_LEFTDOWN, x, y)
-    _send_mouse(MOUSEEVENTF_LEFTUP, x, y)
 
 
 def signal_handler(signum, frame):
