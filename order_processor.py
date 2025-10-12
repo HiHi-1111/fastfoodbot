@@ -14,7 +14,7 @@ ingredients = ["patty", "lettuce", "onion","cheese", "tomato", "veg"]
 modifers = ["1x", "2x", "3x"]
 
 
-ITEM_LABELS = ["cheese", "lettuce", "tomato", "onion", "patty"]
+ITEM_LABELS = ["cheese", "lettuce", "tomato", "onion", "patty", "veg"]
 _ITEM_INDEX = {name: idx for idx, name in enumerate(ITEM_LABELS)}
 _TEMPLATE_DIR = Path("images/types")
 
