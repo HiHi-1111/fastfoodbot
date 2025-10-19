@@ -117,6 +117,101 @@ def _template_match_score(image, template):
     return float(max(scores))
 
 
+def _crop_to_content(image):
+    """
+    Trim background padding so feature extraction focuses on the ingredient itself.
+    Keeps the original image when no confident crop can be determined.
+    """
+    if image is None or image.size == 0:
+        return image
+    section = image
+    if section.ndim == 3 and section.shape[2] == 4:
+        section = cv2.cvtColor(section, cv2.COLOR_BGRA2BGR)
+    hsv = cv2.cvtColor(section, cv2.COLOR_BGR2HSV)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    mask = ((sat > 30) | (val < 230)).astype(np.uint8) * 255
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    contours_info = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = contours_info[0] if len(contours_info) == 2 else contours_info[1]
+    if not contours:
+        return section
+
+    contour = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(contour)
+    if w < 6 or h < 6:
+        return section
+    full_area = section.shape[0] * section.shape[1]
+    region_area = w * h
+    area_ratio = region_area / float(full_area or 1)
+    if area_ratio < 0.05 or area_ratio > 0.98:
+        return section
+
+    pad_x = max(4, int(round(min(w, section.shape[1]) * 0.05)))
+    pad_y = max(4, int(round(min(h, section.shape[0]) * 0.05)))
+
+    if h < section.shape[0] * 0.88:
+        y1, y2 = 0, section.shape[0]
+    else:
+        y1 = max(y - pad_y, 0)
+        y2 = min(y + h + pad_y, section.shape[0])
+
+    if w < section.shape[1] * 0.92:
+        x1 = max(x - pad_x, 0)
+        x2 = min(x + w + pad_x, section.shape[1])
+    else:
+        x1, x2 = 0, section.shape[1]
+
+    cropped = section[y1:y2, x1:x2]
+    return cropped if cropped.size else section
+
+
+def _has_leaf_icon(image, ratios=None):
+    """
+    Detect the small green leaf overlay used on the veg patty icon.
+    We look for a tight cluster of vivid green pixels in the top-right portion
+    while ensuring the base still contains some brown tones.
+    """
+    if image is None or image.size == 0:
+        return False
+    h, w = image.shape[:2]
+    if h < 16 or w < 16:
+        return False
+
+    top_h = max(4, int(round(h * 0.45)))
+    right_x = min(w, max(1, int(round(w * 0.55))))
+    leaf_region = image[:top_h, right_x:]
+    if leaf_region.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(leaf_region, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    green_mask = (
+        (hue >= 35) & (hue <= 95) &
+        (sat >= 60) & (val >= 120)
+    )
+    if green_mask.size == 0:
+        return False
+
+    green_ratio = float(green_mask.mean())
+    green_pixels = int(green_mask.sum())
+    if green_ratio < 0.06 or green_pixels < max(18, int(0.008 * green_mask.size)):
+        return False
+
+    if isinstance(ratios, dict) and ratios.get("brown", 0.0) < 0.05:
+        return False
+
+    overall_green = ratios.get("green") if isinstance(ratios, dict) else None
+    if overall_green is not None and overall_green > 0.3:
+        return False
+
+    return True
+
+
 def compare_images(np_image, template_img):
     """Compute normalized cross-correlation score between an image region and template."""
     if template_img is None or template_img.size == 0 or np_image is None or np_image.size == 0:
@@ -153,7 +248,12 @@ def compare_images(np_image, template_img):
 
 
 def identify_ingredient(image):
-    metrics = _compute_color_features(image)
+    content_image = _crop_to_content(image)
+    if content_image is None or content_image.size == 0:
+        return -1
+    analysis_image = cv2.GaussianBlur(content_image, (3, 3), 0)
+
+    metrics = _compute_color_features(analysis_image)
     if not metrics:
         return -1
 
@@ -173,7 +273,7 @@ def identify_ingredient(image):
         color_dist = float(np.linalg.norm(avg_lab - template_lab))
         hist_score = cv2.compareHist(hist, template_hist, cv2.HISTCMP_CORREL)
         hist_distance = 1.0 - float(hist_score)
-        template_score = _template_match_score(image, template_image)
+        template_score = _template_match_score(analysis_image, template_image)
         template_distance = 1.0 - template_score
 
         total_dist = color_dist + 40.0 * hist_distance + 35.0 * template_distance
@@ -197,8 +297,12 @@ def identify_ingredient(image):
     yellow_ratio = ratios["yellow"]
     brown_ratio = ratios["brown"]
 
+    leaf_present = _has_leaf_icon(content_image, ratios)
+
     candidate = None
-    if green_ratio > 0.16 and green_ratio - max(red_ratio, yellow_ratio) > 0.05:
+    if leaf_present:
+        candidate = "veg"
+    elif green_ratio > 0.16 and green_ratio - max(red_ratio, yellow_ratio) > 0.05:
         candidate = "lettuce"
     elif brown_ratio > 0.14 and r > 115 and g > 85 and b < 170:
         candidate = "patty"
@@ -208,6 +312,9 @@ def identify_ingredient(image):
         candidate = "cheese"
     elif red_ratio > 0.15 and b > 165 and r > 165:
         candidate = "onion"
+
+    if candidate == "patty" and leaf_present:
+        candidate = "veg"
 
     if candidate is None or candidate not in distances:
         candidate = best_name
@@ -222,12 +329,16 @@ def identify_ingredient(image):
             else:
                 candidate = best_name
 
+    if candidate == "patty" and leaf_present:
+        candidate = "veg"
+
     thresholds = {
         "cheese": 70.0,
         "lettuce": 85.0,
         "tomato": 85.0,
         "onion": 90.0,
         "patty": 90.0,
+        "veg": 92.0,
     }
 
     def _within_threshold(name):

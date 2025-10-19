@@ -1,0 +1,29 @@
+{
+  "version": "1.1",
+  "t0_definition": "Right-side panel fully open & stationary",
+  "safety": {
+    "extra_delay_s": 0.20,
+    "stability_check": { "fps": 60, "min_frames": 6, "min_duration_s": 0.10 }
+  },
+  "steps": [
+    { "idx": 0, "label": "panel_popup", "delta_from_prev_s": 0.00, "t_abs_from_t0_s": 0.00 },
+
+    { "idx": 1, "label": "phase1_order_start", "delta_from_prev_s": 1.41, "t_abs_from_t0_s": 1.41 },
+    { "idx": 2, "label": "phase1_order_end",   "delta_from_prev_s": 4.79, "t_abs_from_t0_s": 6.20 },
+
+    { "idx": 3, "label": "phase2_order_start", "delta_from_prev_s": 2.99, "t_abs_from_t0_s": 9.19 },
+    { "idx": 4, "label": "phase2_order_end",   "delta_from_prev_s": 2.84, "t_abs_from_t0_s": 12.03 },
+
+    { "idx": 5, "label": "phase3_order_start", "delta_from_prev_s": 3.07, "t_abs_from_t0_s": 15.10 },
+    { "idx": 6, "label": "phase3_order_end",   "delta_from_prev_s": 1.73, "t_abs_from_t0_s": 16.83 },
+
+    {
+      "idx": 7,
+      "label": "beginning_of_new_phase",
+      "delta_from_prev_s": 8.13,
+      "t_abs_from_t0_s": 24.96,
+      "action": "begin_next_order_phase1_start",
+      "jump_to_step_idx": 1
+    }
+  ]
+}
