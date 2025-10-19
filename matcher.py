@@ -86,9 +86,6 @@ class ImageMatcher:
             self.result_label["text"] = "Nothing to see yet."
             return
 
-        # Process the current image.
-        # res = order_processor(self.current_image)
-
         # Calculate proportional coordinates for the slice
         height, width = self.current_image.shape[:2]
     

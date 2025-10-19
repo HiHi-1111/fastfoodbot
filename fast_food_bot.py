@@ -14,7 +14,22 @@ import sys
 
 class FastFoodBot:
     def __init__(self):
-        self.current_state = 1
+        # The customer_state variable tells us the current state of the order board on the game screen. 
+        # 0 - means not in an order.
+        # 1 - means the screen is showing the customer's burger ingredients.
+        # 2 - means the screen is showing the customer's fry order (french fries vs onion rings vs...)
+        # 3 - means the screen is showing the customer's drink order (small, medium, large)
+        # 4 - is the 'did you catch that?' screen. Technically, this is the only time when the "Can you repeat?" button should be active.
+        self.customer_state = 1
+
+        # The order_state variable tells us where we are in the order execution process.
+        # 0 - means not in an order.
+        # 1 - means the burger is being assembled.
+        # 2 - means the fries are being prepared.
+        # 3 - means the drink is being prepared.
+        # 4 - means the order is complete.
+        self.order_state = 0
+        
         self.items = ["cheese", "lettuce", "tomato", "onion", "patty"]
         self.step_duraction_alpha = 0.01
         self.screen_width, self.screen_height = pyautogui.size()
@@ -26,7 +41,7 @@ class FastFoodBot:
         self.gui_root = tk.Tk()
         self.gui_root.title("Fast Food Bot State")
         self.gui_root.protocol("WM_DELETE_WINDOW", self.shutdown)  # Handle window close
-        self.state_label = tk.Label(self.gui_root, text=f"Current State: {self.current_state}", font=("Arial", 16))
+        self.state_label = tk.Label(self.gui_root, text=f"Current State: {self.customer_state}", font=("Arial", 16))
         self.state_label.pack(padx=20, pady=10)
 
         # Add ingredients display
@@ -54,7 +69,7 @@ class FastFoodBot:
             self.gui_root.destroy()
 
     def update_gui_state(self):
-        self.state_label.config(text=f"Current State: {self.current_state}")
+        self.state_label.config(text=f"Current State: {self.customer_state}")
 
     def update_gui_ingredients(self):
         """Update the ingredients display in the GUI"""
@@ -118,7 +133,7 @@ class FastFoodBot:
         # Update screenshot in GUI
         self.update_gui_screenshot(image)
 
-        match self.current_state:
+        match self.customer_state:
             case 0:
                 time.sleep(0.5)
                 # Clear ingredients to identify section
@@ -167,14 +182,14 @@ class FastFoodBot:
                     self.select_button("can_you_repeat")
                 # TODO: Click the appropriate buttons.
                 self.select_button("bottom_bun")
-                time.sleep(4)
+                time.sleep(1)
                 for item in self.items_in_order:
                     if self.items_in_order[item] > 0:
                         print("clicking on ", item)
                         self.select_button(item)
-                        time.sleep(4)
+                        time.sleep(1)
                 self.select_button("top_bun")
-                time.sleep(4)
+                # TODO: by now the screen should have moved on to the next phase. Just end here.
 
                 # Figure out what happens after this.
                 return
@@ -212,7 +227,6 @@ class FastFoodBot:
                 if time.time() - last_timestamp < 1:
                     time.sleep(2)
                 image = pyautogui.screenshot()
-                print("new screenshot")
                 image = image.convert("RGB")
                 image_np = np.array(image)
                 
@@ -221,7 +235,7 @@ class FastFoodBot:
                 
                 new_state = get_current_phase(image_np)
                 print("Here's the new state", new_state)
-                self.current_state = new_state
+                self.customer_state = new_state
                 self.update_gui_state()
                 self.handle_dialog(image_np)
                 last_timestamp = time.time()

@@ -75,7 +75,24 @@ def identify_ingredient(image):
     if brown>=0.25*total_rel:
         return 4
     return -1
+
+def identify_side(image):
+    """
+    This takes in a portion of a screenshot of a side and uses template matching to identify the kind of side dish.
+
+    Take this image array and match it against each of the three template images that are in the images/sides folder until it finds a match confidence of at least 0.9. If no match is found, returns "unknown".
     
+    Returns the file name of the best match in the images/sides folder (without the .png extension), or just "unknown" if no match is found.
+    """
+    pass
+
+def identify_drink_size(image):
+    """
+    This uses OCR to identify wheter the drink ingredient is small, medium or large. Just looks for the capital letters S, M or L in the image.
+    Returns "S", "M" or "L".
+    """
+    pass
+
 def are_we_in_an_order(image):
     red, green, blue = 101, 175, 74
     x_start, y_start = 2468, 827
@@ -92,27 +109,6 @@ def are_we_in_an_order(image):
     
     print(f"Green count: {green_count}, total pxls: {total_pxls}")
     return green_count > 0.5*total_pxls
-
-# Input: 
-# - a picture array (2d array) of an order
-# Output:
-# - dictionary showing how many of each ingredients were requested.
-def order_processor(image):
-    ingredient_count = dict()
-    for item in ingredients:
-        ingredient_count[item] = 0
-
-    for item in ingredients:
-        image_path = os.path.join('images/types', item + ".png")
-        comp_image = cv2.imread(image_path)
-        
-        if comp_image is not None:
-            score = compare_images(image, comp_image)
-            print(f"Comparing against {item}, got {score}")
-            if score > 0.9:
-                ingredient_count[item] += 1
-    
-    return ingredient_count
 
 
 def split_order_items(order_image):
