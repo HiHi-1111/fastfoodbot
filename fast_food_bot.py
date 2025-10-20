@@ -22,6 +22,11 @@ try:
 except ImportError:
     easyocr = None
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 class FastFoodBot:
     def __init__(self):
         self.current_state = 1
@@ -56,6 +61,7 @@ class FastFoodBot:
         self.order_log = None
         self.order_counter = 0
         self.processed_phases = set()
+        self._text_gpu_enabled = self._should_use_gpu()
         self._text_detector = self._init_text_detector()
         self.latest_text_overlay = None
         self._last_text_events = {}
@@ -323,12 +329,45 @@ class FastFoodBot:
                 return 'drinks_icon'
         return None
 
+    def _should_use_gpu(self):
+        if torch is None:
+            print("Text detector falling back to CPU (torch not installed).")
+            return False
+        try:
+            available = torch.cuda.is_available()
+        except Exception:
+            available = False
+        if available:
+            try:
+                device_name = torch.cuda.get_device_name(0)
+                print(f"Text detector will use GPU: {device_name}")
+            except Exception:
+                print("Text detector will use GPU (device name unavailable).")
+            return True
+        print("Text detector falling back to CPU (no CUDA device detected).")
+        return False
+
     def _init_text_detector(self):
         if easyocr is None:
             return None
+        prefer_gpu = getattr(self, "_text_gpu_enabled", False)
         try:
-            return easyocr.Reader(['en'], gpu=False)
+            reader = easyocr.Reader(['en'], gpu=prefer_gpu)
+            mode = "GPU" if prefer_gpu else "CPU"
+            print(f"EasyOCR reader initialized on {mode}.")
+            return reader
         except Exception as exc:
+            if prefer_gpu:
+                print(f"EasyOCR GPU init failed ({exc}); retrying on CPU.")
+                try:
+                    reader = easyocr.Reader(['en'], gpu=False)
+                    print("EasyOCR reader initialized on CPU (fallback).")
+                    self._text_gpu_enabled = False
+                    return reader
+                except Exception as sub_exc:
+                    print(f"Warning: easyocr CPU fallback failed ({sub_exc}); falling back to pytesseract.")
+                    self._text_gpu_enabled = False
+                    return None
             print(f"Warning: easyocr unavailable ({exc}); falling back to pytesseract.")
             return None
 
