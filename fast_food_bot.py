@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from text_finder_orc import get_current_phase
-from order_processor import split_order_items, identify_ingredient
+from order_processor import split_order_items, identify_ingredient, SideMatcher
 import time
 import pyautogui
 import json
@@ -22,20 +22,35 @@ class FastFoodBot:
         # 4 - is the 'did you catch that?' screen. Technically, this is the only time when the "Can you repeat?" button should be active.
         self.customer_state = 1
 
-        # The order_state variable tells us where we are in the order execution process.
-        # 0 - means not in an order.
-        # 1 - means the burger is being assembled.
-        # 2 - means the fries are being prepared.
-        # 3 - means the drink is being prepared.
-        # 4 - means the order is complete.
-        self.order_state = 0
-        
-        self.items = ["cheese", "lettuce", "tomato", "onion", "patty"]
-        self.step_duraction_alpha = 0.01
-        self.screen_width, self.screen_height = pyautogui.size()
-        self.items_in_order = {item: 0 for item in self.items}
+        # Used to indicate if an order is currently being made.
+        self.order_in_progress = False
+
+        # An order consists of the following:
+        # - a selection of burger ingredients
+        # - a side selection, which includes the following two selections on the same selection window:
+        #     - a choice of side (either fries, thick fries, or onion rings)
+        #     - a size for the side -- either large, medium or small
+        # - a drink size (also either large, medium or small)
+        self.burger_items = ["cheese", "lettuce", "tomato", "onion", "patty", "veg"]
+        self.sides = ["fries", "onion_rings", "thick_fries"]
+        self.sizes = ["L", "M", "S"]
+        self.items_organized = {
+            "burger": {
+                b_item: 0 for b_item in self.burger_items
+            },
+            "side_type": "",
+            "side_size": "",
+            "drink_size": ""
+        }
         self.order_started = False
         self.running = True  # Flag to control the loop
+
+        # Some configs
+        self.step_duraction_alpha = 0.01
+        self.screen_width, self.screen_height = pyautogui.size()
+
+        # For identifying side order as well as drink sizes.
+        self.side_matcher = SideMatcher()
 
         # GUI setup
         self.gui_root = tk.Tk()
@@ -69,15 +84,22 @@ class FastFoodBot:
             self.gui_root.destroy()
 
     def update_gui_state(self):
-        self.state_label.config(text=f"Current State: {self.customer_state}")
+        _text = f"State: reading phase {self.customer_state}"
+        if self.order_in_progress:
+            _text = "State: making order..."
+        self.state_label.config(text=_text)
 
     def update_gui_ingredients(self):
         """Update the ingredients display in the GUI"""
         if not self.order_started:
-            ingredients_text = "Current Order: None"
+            ingredients_text = "Current order: None"
         else:
+            ingredient_text = "Current order:\n- Burger:\n"
             # Show only ingredients with count > 0
-            active_items = [f"{item}: {count}" for item, count in self.items_in_order.items() if count > 0]
+            ingredeint_text += "\n".join([f"\t\t{item}: {count}" for item, count in self.items_organized["burger"].items() if count > 0])
+            ingredient_text += "\n- Side:\n"
+            ingredient_text += f"\t\t{self.burger_items['side_type']}: {self.burger_items['side_size']}\n"
+            ingredient_text += f"- Drink:\n\t\t{self.burger_items['drink_size']}"
             if active_items:
                 ingredients_text = "Current Order:\n" + "\n".join(active_items)
             else:
@@ -128,10 +150,26 @@ class FastFoodBot:
 
             label = tk.Label(self.ingredients_frame, image=tk_img)
             label.grid(row=1, column=i, padx=5, pady=2)
+    
+    def is_ordering_complete(self):
+        if not self.items_organized["drink_size"] or not self.items_organized["side_type"] or not self.items_organized["side_size"]:
+            return False
+        for val in self.items_organized["burger"].values():
+            if val:
+                return True
+        return False
+        
 
     def handle_dialog(self, image: np.ndarray):
+        """
+        This function is where you keep record of what order is being made. You should wait until the entire order information has been recorded
+        before invoking self.make_the_order at the end in order to make the order.
+        """
         # Update screenshot in GUI
         self.update_gui_screenshot(image)
+
+        if self.order_in_progress:
+            return
 
         match self.customer_state:
             case 0:
@@ -161,8 +199,8 @@ class FastFoodBot:
                 # Extract the relevant portion
                 relevant_portion = image[y1:y2, x1:x2]
 
-                for item in self.items:
-                    self.items_in_order[item] = 0
+                for item in self.burger_items:
+                    self.items_organized["burger"][item] = 0
                 all_items = split_order_items(relevant_portion)
                 print("ingredient count:", len(all_items))
                 ingredients_added = False
@@ -170,53 +208,76 @@ class FastFoodBot:
                     item_idx = identify_ingredient(item)  # Note: now passing individual item image
                     if item_idx > -1:
                         # TODO: Use template matching to identify the count instead of just setting to 1.
-                        self.items_in_order[self.items[item_idx]] = 1
+                        self.items_organized["burger"][self.burger_items[item_idx]] = 1
                         ingredients_added = True
 
                 # Update GUI with current ingredients
                 self.update_gui_ingredients()
                 # Update GUI with images of items to identify
                 self.update_ingredients_to_identify(all_items)
-
-                if not ingredients_added:
-                    self.select_button("can_you_repeat")
-                # TODO: Click the appropriate buttons.
-                self.select_button("bottom_bun")
-                time.sleep(1)
-                for item in self.items_in_order:
-                    if self.items_in_order[item] > 0:
-                        print("clicking on ", item)
-                        self.select_button(item)
-                        time.sleep(1)
-                self.select_button("top_bun")
-                # TODO: by now the screen should have moved on to the next phase. Just end here.
-
-                # Figure out what happens after this.
                 return
+            
             case 2:
-                self.update_ingredients_to_identify([])  # Clear section
-                if not self.order_started:
-                    self.select_button("can_you_repeat")
-                else:
-                    # TODO: figure out the fries requested
-                    return
+                if self.order_started:
+                    side_image = self.side_matcher.get_side_from_order(image)
+                    self.update_ingredients_to_identify([])
+                    side_result = self.side_matcher.identify(side_image)
+                    if side_result in self.sides:
+                        self.items_organized["side_type"] = side_result
+
+                    side_size = self.side_matcher.check_size(side_image)
+                    if side_size in self.sizes:
+                        self.items_organized["side_size"] = side_size
                 return
             case 3:
-                self.update_ingredients_to_identify([])  # Clear section
-                if not self.order_started:
-                    self.select_button("can_you_repeat")
-                else:
-                    # TODO: firgure out the drink size
-                    return
+                """
+                for now, the bot doesn't yet handle drink types, only drink sizes. So in self.make_the_order it simply clicks on a default drink type.
+                """
+                if self.order_started:
+                    d_image = self.side_matcher.get_side_from_order(image)
+                    self.update_ingredients_to_identify([d_image])
+                    d_size = self.side_matcher.check_size(d_image)
+                    if d_size in self.sizes:
+                        self.items_organized["drink_size"] = d_size
+                return
             case 4:
                 self.update_ingredients_to_identify([])  # Clear section
-                if not self.order_started:
+                if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
                 else:
-                    self.order_started=False
-                    self.update_gui_ingredients()  # Clear ingredients when order ends
-                    time.sleep(1)
-                return
+                    self.make_the_order()
+    
+    def make_the_order(self):
+        if self.order_in_progress:
+            return
+        self.order_in_progress = True
+        # Make the burger
+        self.select_button("bottom_bun")
+        time.sleep(1)
+        for item in self.items_organized["burger"]:
+            if self.items_organized["burger"][item] > 0:
+                print("clicking on ", item)
+                self.select_button(item)
+                time.sleep(1)
+        self.select_button("top_bun")
+        time.sleep(1)
+
+        # Pick the fries.
+        self.select_button("side")
+        time.sleep(0.5)
+        self.select_button(self.items_organized["side_type"])
+        time.sleep(0.5)
+        self.select_button(self.items_organized["side_size"])
+        time.sleep(1)
+        self.select_button("drink")
+        time.sleep(0.5)
+        # NOTE: clicking "fries" simply because the default drink shows up at the same coordinates. 
+        # First build the identification for drink types. Then select the correct drink type here.
+        self.select_button("fries")
+        self.select_button(self.items_organized["drink_size"])
+        time.sleep(0.5)
+        self.select_button("done")
+        self.order_in_progress = False
                 
     def loop(self):
         last_timestamp = time.time()

@@ -6,10 +6,14 @@
 
 import numpy as np
 import cv2
+from PIL import Image
+import pytesseract
 import os
+import json
 
 
 ingredients = ["patty", "lettuce", "onion","cheese", "tomato", "veg"]
+sides = ["fries", "thick_fries", "onion_rings"]
 modifers = ["1x", "2x", "3x"]
 
 def compare_images(np_image, template_img):
@@ -76,15 +80,6 @@ def identify_ingredient(image):
         return 4
     return -1
 
-def identify_side(image):
-    """
-    This takes in a portion of a screenshot of a side and uses template matching to identify the kind of side dish.
-
-    Take this image array and match it against each of the three template images that are in the images/sides folder until it finds a match confidence of at least 0.9. If no match is found, returns "unknown".
-    
-    Returns the file name of the best match in the images/sides folder (without the .png extension), or just "unknown" if no match is found.
-    """
-    pass
 
 def identify_drink_size(image):
     """
@@ -174,3 +169,137 @@ def split_order_items(order_image):
     print("Identified this many items: ", len(item_sections))
 
     return item_sections
+
+
+class SideMatcher:
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self, config_file):
+        if not hasattr(self, '_initialized'):
+            self.side_images = {
+                item: cv2.imread("images/sides"+item+".png") for item in sides
+            }
+            self._initialized = True
+            self.default_crop_dims = {
+                "x": 1130,
+                "y": 300,
+                "height": 80,
+                "width": 265
+            }
+            self.crop_dims = None
+            if config_file:
+                self.load_config(config_file)
+
+    def load_config(self, config_path: str):
+        """Load dialog region configuration from JSON file"""
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                self.crop_dims = config.get('side_order', self.default_crop_dims)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Could not load config from {config_path}, sticking to defaults")
+    
+    def get_side_from_order(self, image):
+        dims = self.crop_dims if self.crop_dims else self.default_crop_dims
+        return image[dims["x"]:dims["x"]+dims["width"], dims["y"]:dims["y"]+dims["height"]]
+
+    def identify(self, image):
+        """
+        This takes in a portion of a screenshot of a side and uses template matching to identify the kind of side dish.
+
+        Take this image array and match it against each of the three template images that are in the images/sides folder until it finds a match confidence of at least 0.9. If no match is found, returns "unknown".
+        
+        Returns the file name of the best match in the images/sides folder (without the .png extension), or just "unknown" if no match is found.
+        """
+        best_score = 0
+        best_item = None
+        for item in sides:
+            result = cv2.matchTemplate(image, self.side_images[item], cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            if max_val > best_score:
+                best_score = max_val
+                best_item = item
+        if best_score > 0.8:
+            print(f"Detected side: {best_item}")
+            return best_item
+        else:
+            print(f"Failed to detect any side")
+            return ""
+    
+    def check_size(self, cropping):
+        """
+        This reads the size symbol on a given order: either S (for small), M (medium) or L (large).
+        """
+        if len(cropping.shape) == 3:
+            gray = cv2.cvtColor(cropping, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cropping.copy()
+		
+        # Enhance contrast
+        enhanced = cv2.convertScaleAbs(gray, alpha=1.2, beta=10)
+		
+        # Apply Gaussian blur to smooth text
+        blurred = cv2.GaussianBlur(enhanced, (1, 1), 0)
+		
+        # Adaptive thresholding for better text extraction
+        # Try different threshold methods
+        thresh1 = cv2.adaptiveThreshold(
+            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY, 11, 2
+        )
+		
+        # thresh2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+        results = []
+		
+        # Convert to PIL Image
+        pil_image = Image.fromarray(thresh1)
+
+        # Method 1: Standard configuration
+        try:
+            text1 = pytesseract.image_to_string(pil_image, config=self.tesseract_config)
+            if text1.strip():
+                results.append(self.clean_extracted_text(text1))
+        except:
+            pass
+
+        # Method 2: Different PSM mode
+        try:
+            config2 = '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?:;"\'-() '
+            text2 = pytesseract.image_to_string(pil_image, config=config2)
+            if text2.strip():
+                results.append(self.clean_extracted_text(text2))
+        except:
+            pass
+
+        # Method 3: Line-by-line extraction
+        try:
+            config3 = '--psm 13'
+            text3 = pytesseract.image_to_string(pil_image, config=config3)
+            if text3.strip():
+                results.append(self.clean_extracted_text(text3))
+        except:
+            pass
+
+        if not results:
+            return ""
+
+        # Filter out very short results (likely errors)
+        valid_results = [r for r in results if len(r.strip()) > 2]
+
+        if not valid_results:
+            return results[0] if results else ""
+
+        # Return the longest reasonable result
+        # (assumes longer results are more complete)
+        best_result = max(valid_results, key=len)
+
+        if best_result.upper() not in ["S", "M", "L"]:
+            return ""
+
+        print("LOGS: found this size: ", best_result)
+        return best_result

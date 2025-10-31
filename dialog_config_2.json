@@ -4,5 +4,11 @@
     "y": 280,
 	  "height": 80,
 		"width": 265
+  },
+  "side_order": {
+    "x": 1130,
+    "y": 300,
+	  "height": 80,
+		"width": 265
   }
 }
