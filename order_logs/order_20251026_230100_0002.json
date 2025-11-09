@@ -1,0 +1,118 @@
+{
+  "order_id": "order_20251026_230100_0002",
+  "started_at": "2025-10-26T23:01:00.705826",
+  "phase_results": {
+    "1": {
+      "items": {
+        "cheese": 2,
+        "lettuce": 0,
+        "tomato": 0,
+        "onion": 0,
+        "patty": 0,
+        "veg": 0
+      },
+      "extras": {
+        "fries_icon": 0,
+        "drinks_icon": 0
+      },
+      "recorded_at": "2025-10-26T23:01:04.365733",
+      "elapsed_s": 3.6599600315093994
+    }
+  },
+  "text_events": [
+    {
+      "text": "all",
+      "confidence": 100.0,
+      "bbox": [
+        125,
+        99,
+        216,
+        181
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:00.876427",
+      "elapsed_s": 0.17064857482910156
+    },
+    {
+      "text": "got",
+      "confidence": 100.0,
+      "bbox": [
+        12,
+        96,
+        154,
+        198
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:00.876533",
+      "elapsed_s": 0.17075276374816895
+    },
+    {
+      "text": "hat?",
+      "confidence": 100.0,
+      "bbox": [
+        0,
+        97,
+        136,
+        179
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:01.235666",
+      "elapsed_s": 0.5298867225646973
+    },
+    {
+      "text": "1 TC",
+      "confidence": 64.59,
+      "bbox": [
+        111,
+        0,
+        216,
+        34
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:05.522531",
+      "elapsed_s": 4.816751956939697
+    },
+    {
+      "text": "X1",
+      "confidence": 51.72,
+      "bbox": [
+        121,
+        146,
+        175,
+        186
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:05.522560",
+      "elapsed_s": 4.816776752471924
+    },
+    {
+      "text": "X2",
+      "confidence": 46.71,
+      "bbox": [
+        119,
+        143,
+        179,
+        187
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:05.902740",
+      "elapsed_s": 5.196960926055908
+    },
+    {
+      "text": "C",
+      "confidence": 97.62,
+      "bbox": [
+        0,
+        0,
+        52,
+        34
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:06.268892",
+      "elapsed_s": 5.56311297416687
+    }
+  ],
+  "with_detected": false,
+  "finished_at": "2025-10-26T23:01:10.759054",
+  "duration_s": 10.053284645080566
+}
