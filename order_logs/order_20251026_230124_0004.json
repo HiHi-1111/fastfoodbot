@@ -1,0 +1,53 @@
+{
+  "order_id": "order_20251026_230124_0004",
+  "started_at": "2025-10-26T23:01:24.163385",
+  "phase_results": {
+    "1": {
+      "items": {
+        "cheese": 1,
+        "lettuce": 1,
+        "tomato": 0,
+        "onion": 0,
+        "patty": 0,
+        "veg": 0
+      },
+      "extras": {
+        "fries_icon": 0,
+        "drinks_icon": 0
+      },
+      "recorded_at": "2025-10-26T23:01:28.405501",
+      "elapsed_s": 4.242168426513672
+    }
+  },
+  "text_events": [
+    {
+      "text": "all",
+      "confidence": 100.0,
+      "bbox": [
+        125,
+        99,
+        216,
+        179
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:24.334404",
+      "elapsed_s": 0.17106413841247559
+    },
+    {
+      "text": "got",
+      "confidence": 100.0,
+      "bbox": [
+        11,
+        94,
+        154,
+        198
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T23:01:24.334431",
+      "elapsed_s": 0.17108726501464844
+    }
+  ],
+  "with_detected": false,
+  "finished_at": "2025-10-26T23:01:31.727398",
+  "duration_s": 7.564062118530273
+}

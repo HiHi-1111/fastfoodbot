@@ -1,0 +1,183 @@
+{
+  "order_id": "order_20251026_225447_0001",
+  "started_at": "2025-10-26T22:54:47.726287",
+  "phase_results": {
+    "1": {
+      "items": {
+        "cheese": 1,
+        "lettuce": 0,
+        "tomato": 0,
+        "onion": 0,
+        "patty": 0,
+        "veg": 1
+      },
+      "extras": {
+        "fries_icon": 0,
+        "drinks_icon": 0
+      },
+      "recorded_at": "2025-10-26T22:54:53.174492",
+      "elapsed_s": 5.4505040645599365
+    }
+  },
+  "text_events": [
+    {
+      "text": "U",
+      "confidence": 98.63,
+      "bbox": [
+        0,
+        113,
+        46,
+        171
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:47.927404",
+      "elapsed_s": 0.2034156322479248
+    },
+    {
+      "text": "all",
+      "confidence": 100.0,
+      "bbox": [
+        134,
+        100,
+        216,
+        176
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:47.927479",
+      "elapsed_s": 0.20348072052001953
+    },
+    {
+      "text": "got",
+      "confidence": 100.0,
+      "bbox": [
+        29,
+        94,
+        163,
+        195
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:47.927513",
+      "elapsed_s": 0.20351386070251465
+    },
+    {
+      "text": "hat?",
+      "confidence": 100.0,
+      "bbox": [
+        0,
+        97,
+        124,
+        177
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:48.426848",
+      "elapsed_s": 0.7028534412384033
+    },
+    {
+      "text": "U",
+      "confidence": 98.63,
+      "bbox": [
+        0,
+        113,
+        46,
+        171
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:56.700154",
+      "elapsed_s": 8.976158380508423
+    },
+    {
+      "text": "all",
+      "confidence": 100.0,
+      "bbox": [
+        134,
+        100,
+        216,
+        176
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:56.700185",
+      "elapsed_s": 8.976186513900757
+    },
+    {
+      "text": "got",
+      "confidence": 100.0,
+      "bbox": [
+        31,
+        98,
+        162,
+        193
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:56.700210",
+      "elapsed_s": 8.976210594177246
+    },
+    {
+      "text": "hat?",
+      "confidence": 100.0,
+      "bbox": [
+        0,
+        97,
+        124,
+        177
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:54:57.151454",
+      "elapsed_s": 9.427459001541138
+    },
+    {
+      "text": "U",
+      "confidence": 98.63,
+      "bbox": [
+        0,
+        113,
+        46,
+        171
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:55:01.831934",
+      "elapsed_s": 14.107939004898071
+    },
+    {
+      "text": "all",
+      "confidence": 100.0,
+      "bbox": [
+        134,
+        100,
+        216,
+        176
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:55:01.831976",
+      "elapsed_s": 14.107978343963623
+    },
+    {
+      "text": "got",
+      "confidence": 100.0,
+      "bbox": [
+        29,
+        94,
+        163,
+        195
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:55:01.832009",
+      "elapsed_s": 14.108010292053223
+    },
+    {
+      "text": "hat?",
+      "confidence": 100.0,
+      "bbox": [
+        0,
+        97,
+        124,
+        177
+      ],
+      "phase": "1",
+      "recorded_at": "2025-10-26T22:55:02.247797",
+      "elapsed_s": 14.523802995681763
+    }
+  ],
+  "with_detected": false,
+  "finished_at": "2025-10-26T22:55:14.027806",
+  "duration_s": 26.30381679534912
+}
