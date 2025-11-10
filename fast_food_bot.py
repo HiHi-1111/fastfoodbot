@@ -50,7 +50,7 @@ class FastFoodBot:
         self.screen_width, self.screen_height = pyautogui.size()
 
         # For identifying side order as well as drink sizes.
-        self.side_matcher = SideMatcher()
+        self.side_matcher = SideMatcher("dialog_config_2.json")
 
         # GUI setup
         self.gui_root = tk.Tk()
@@ -94,16 +94,12 @@ class FastFoodBot:
         if not self.order_started:
             ingredients_text = "Current order: None"
         else:
-            ingredient_text = "Current order:\n- Burger:\n"
+            ingredients_text = "Current order:\n- Burger:\n"
             # Show only ingredients with count > 0
-            ingredeint_text += "\n".join([f"\t\t{item}: {count}" for item, count in self.items_organized["burger"].items() if count > 0])
-            ingredient_text += "\n- Side:\n"
-            ingredient_text += f"\t\t{self.burger_items['side_type']}: {self.burger_items['side_size']}\n"
-            ingredient_text += f"- Drink:\n\t\t{self.burger_items['drink_size']}"
-            if active_items:
-                ingredients_text = "Current Order:\n" + "\n".join(active_items)
-            else:
-                ingredients_text = "Current Order: Processing..."
+            ingredients_text += "\n".join([f"\t\t{item}: {count}" for item, count in self.items_organized["burger"].items() if count > 0])
+            ingredients_text += "\n- Side:\n"
+            ingredients_text += f"\t\t{self.items_organized['side_type']}: {self.items_organized['side_size']}\n"
+            ingredients_text += f"- Drink:\n\t\t{self.items_organized['drink_size']}"
         
         self.ingredients_label.config(text=ingredients_text)
 
@@ -187,7 +183,7 @@ class FastFoodBot:
                 # Convert to proportions
                 x1_prop = 421/2560  # Left x coordinate
                 x2_prop = 2116/2560  # Right x coordinate
-                y1_prop = 232/1369  # Top y coordinate
+                y1_prop = 300/1369  # Top y coordinate
                 y2_prop = 545/1369  # Bottom y coordinate
 
                 # Calculate actual coordinates for current image
@@ -202,14 +198,13 @@ class FastFoodBot:
                 for item in self.burger_items:
                     self.items_organized["burger"][item] = 0
                 all_items = split_order_items(relevant_portion)
-                print("ingredient count:", len(all_items))
-                ingredients_added = False
+                spotted_stuff = 0
                 for item in all_items:
                     item_idx = identify_ingredient(item)  # Note: now passing individual item image
                     if item_idx > -1:
+                        spotted_stuff += 1
                         # TODO: Use template matching to identify the count instead of just setting to 1.
                         self.items_organized["burger"][self.burger_items[item_idx]] = 1
-                        ingredients_added = True
 
                 # Update GUI with current ingredients
                 self.update_gui_ingredients()
@@ -220,6 +215,7 @@ class FastFoodBot:
             case 2:
                 if self.order_started:
                     side_image = self.side_matcher.get_side_from_order(image)
+                    self.update_gui_ingredients()
                     self.update_ingredients_to_identify([])
                     side_result = self.side_matcher.identify(side_image)
                     if side_result in self.sides:
@@ -235,12 +231,14 @@ class FastFoodBot:
                 """
                 if self.order_started:
                     d_image = self.side_matcher.get_side_from_order(image)
+                    self.update_gui_ingredients()
                     self.update_ingredients_to_identify([d_image])
                     d_size = self.side_matcher.check_size(d_image)
                     if d_size in self.sizes:
                         self.items_organized["drink_size"] = d_size
                 return
             case 4:
+                self.update_gui_ingredients()
                 self.update_ingredients_to_identify([])  # Clear section
                 if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
@@ -295,7 +293,6 @@ class FastFoodBot:
                 self.update_gui_screenshot(image)
                 
                 new_state = get_current_phase(image_np)
-                print("Here's the new state", new_state)
                 self.customer_state = new_state
                 self.update_gui_state()
                 self.handle_dialog(image_np)
@@ -303,7 +300,7 @@ class FastFoodBot:
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print(f"Error in main loop: {e}")
+                print(f"Error in main loop at phase {self.customer_state}: {e}")
                 continue
 
     def select_button(self, ingredient_name: str):

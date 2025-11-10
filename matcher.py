@@ -56,7 +56,6 @@ class ImageMatcher:
         self.sections_label.grid(row=0, column=0, columnspan=10, pady=(0,5), sticky='w')
 
     def paste_image(self, event=None):
-        print("image box clicked!")  # Print message to terminal
         try:
 
             image = ImageGrab.grabclipboard()

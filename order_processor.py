@@ -17,9 +17,6 @@ sides = ["fries", "thick_fries", "onion_rings"]
 modifers = ["1x", "2x", "3x"]
 
 def compare_images(np_image, template_img):
-    # If template is larger than input, skip
-    print(f"Template image shape: {template_img.shape}")
-    print(f"Input image shape: {np_image.shape}")
     if template_img.shape[0] > np_image.shape[0] or template_img.shape[1] > np_image.shape[1]:
         return -1  # Invalid match
     
@@ -102,7 +99,6 @@ def are_we_in_an_order(image):
             if px[0] == red and px[1] == green and px[2] == blue:
                 green_count += 1
     
-    print(f"Green count: {green_count}, total pxls: {total_pxls}")
     return green_count > 0.5*total_pxls
 
 
@@ -166,7 +162,6 @@ def split_order_items(order_image):
         if final_section.size > 0:
             item_sections.append(final_section)
     
-    print("Identified this many items: ", len(item_sections))
 
     return item_sections
 
@@ -201,7 +196,7 @@ class SideMatcher:
                 config = json.load(f)
                 self.crop_dims = config.get('side_order', self.default_crop_dims)
         except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Could not load config from {config_path}, sticking to defaults")
+            print("could not find config file")
     
     def get_side_from_order(self, image):
         dims = self.crop_dims if self.crop_dims else self.default_crop_dims
@@ -224,10 +219,8 @@ class SideMatcher:
                 best_score = max_val
                 best_item = item
         if best_score > 0.8:
-            print(f"Detected side: {best_item}")
             return best_item
         else:
-            print(f"Failed to detect any side")
             return ""
     
     def check_size(self, cropping):
@@ -301,5 +294,4 @@ class SideMatcher:
         if best_result.upper() not in ["S", "M", "L"]:
             return ""
 
-        print("LOGS: found this size: ", best_result)
         return best_result

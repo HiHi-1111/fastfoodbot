@@ -47,7 +47,6 @@ class RobloxDialogOCR:
 				config = json.load(f)
 				self.dialog_region = config.get('dialog_region', self.default_dialog_region)
 		except (FileNotFoundError, json.JSONDecodeError):
-			print(f"Could not load config from {config_path}, using defaults")
 			self.dialog_region = self.default_dialog_region
 	
 	def extract_dialog_region(self, image: np.ndarray) -> np.ndarray:
@@ -384,7 +383,6 @@ def main():
 	result = ocr.read_dialog_text(screenshot_path)
 	
 	if result['success']:
-		print(f"Extracted text: '{result['text']}'")
 		print(f"All OCR attempts: {result['all_results']}")
 	else:
 		print(f"Error: {result['error']}")
@@ -399,7 +397,6 @@ def is_this_phase_2_or_3(image: np.ndarray) -> int:
 	if result['success']:
 		print("Read this: ", result['text'])
 	
-	print("about to exit phase 2/3 check...")
 	if result['text'] == 'With...':
 		return 2
 	elif result['text'] == 'And a...':
@@ -407,7 +404,6 @@ def is_this_phase_2_or_3(image: np.ndarray) -> int:
 	return 0
 
 def is_this_phase_4(image: np.ndarray) -> bool:
-	print("now in phase 4 check function....")
 # # "dialog_region": {
 # #     "x": 1086,
 # #     "y": 1342,
@@ -420,7 +416,6 @@ def is_this_phase_4(image: np.ndarray) -> bool:
 	ocr = RobloxDialogOCR('dialog_config_4.json')
 	result = ocr.read_dialog_text_from_array(image)
 
-	print("now about to exit phase 4 check....")
 	if result['success']:
 		return 'Canyourepeat?' in result['text']
 	return False
@@ -431,7 +426,6 @@ def get_current_phase(image: np.ndarray) -> int:
 	if is_this_phase_4(image):
 		return 4
 	phase_2_or_3 = is_this_phase_2_or_3(image)
-	print("now about to return 2/3/1...")
 	if (phase_2_or_3):
 		return phase_2_or_3
 	return 1
