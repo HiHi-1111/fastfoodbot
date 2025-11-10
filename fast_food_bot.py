@@ -216,7 +216,7 @@ class FastFoodBot:
                 if self.order_started:
                     side_image = self.side_matcher.get_side_from_order(image)
                     self.update_gui_ingredients()
-                    self.update_ingredients_to_identify([])
+                    self.update_ingredients_to_identify([side_image])
                     side_result = self.side_matcher.identify(side_image)
                     if side_result in self.sides:
                         self.items_organized["side_type"] = side_result
