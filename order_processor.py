@@ -202,26 +202,26 @@ class SideMatcher:
         dims = self.crop_dims if self.crop_dims else self.default_crop_dims
         return image[dims["x"]:dims["x"]+dims["width"], dims["y"]:dims["y"]+dims["height"]]
 
-    def identify(self, image):
-        """
-        This takes in a portion of a screenshot of a side and uses template matching to identify the kind of side dish.
+    # def identify(self, image):
+    #     """
+    #     This takes in a portion of a screenshot of a side and uses template matching to identify the kind of side dish.
 
-        Take this image array and match it against each of the three template images that are in the images/sides folder until it finds a match confidence of at least 0.9. If no match is found, returns "unknown".
+    #     Take this image array and match it against each of the three template images that are in the images/sides folder until it finds a match confidence of at least 0.9. If no match is found, returns "unknown".
         
-        Returns the file name of the best match in the images/sides folder (without the .png extension), or just "unknown" if no match is found.
-        """
-        best_score = 0
-        best_item = None
-        for item in sides:
-            result = cv2.matchTemplate(image, self.side_images[item], cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(result)
-            if max_val > best_score:
-                best_score = max_val
-                best_item = item
-        if best_score > 0.8:
-            return best_item
-        else:
-            return ""
+    #     Returns the file name of the best match in the images/sides folder (without the .png extension), or just "unknown" if no match is found.
+    #     """
+    #     best_score = 0
+    #     best_item = None
+    #     for item in sides:
+    #         result = cv2.matchTemplate(image, self.side_images[item], cv2.TM_CCOEFF_NORMED)
+    #         _, max_val, _, _ = cv2.minMaxLoc(result)
+    #         if max_val > best_score:
+    #             best_score = max_val
+    #             best_item = item
+    #     if best_score > 0.8:
+    #         return best_item
+    #     else:
+    #         return ""
     
     def check_size(self, cropping):
         """

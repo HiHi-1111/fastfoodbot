@@ -279,7 +279,7 @@ class RobloxDialogOCR:
 				'confidence': 0
 			}
 	
-	def read_dialog_text_from_array(self, image: np.ndarray, auto_detect: bool = False) -> Dict:
+	def read_dialog_text_from_array(self, image: np.ndarray, auto_detect: bool = False, show_region=False) -> Dict:
 		"""
 		Main method to extract text from a given screenshot image array (not a file path)
 		
@@ -310,12 +310,7 @@ class RobloxDialogOCR:
 					dialog_region = self.extract_dialog_region(image)
 			else:
 				dialog_region = self.extract_dialog_region(image)
-				# # display the dialog region in a gui..
-				# cv2.imshow('Dialog Region', dialog_region)
-				# cv2.waitKey(0)
-				# cv2.destroyAllWindows()
-			
-			
+		
 			# Preprocess the dialog region
 			processed_image = self.preprocess_dialog_image(dialog_region)
 			
@@ -327,6 +322,12 @@ class RobloxDialogOCR:
 			
 			# Select best result
 			final_text = self.select_best_result(ocr_results)
+
+			print("OCR Results:", ocr_results)
+			if show_region:
+				cv2.imshow("Dialog Region", dialog_region)
+				cv2.waitKey(3000)
+				cv2.destroyAllWindows()
 			
 			return {
 				'success': True,

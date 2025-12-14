@@ -11,6 +11,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import signal
 import sys
+from sides_and_drinks import spot_drink, detect_side
 
 class FastFoodBot:
     def __init__(self):
@@ -40,6 +41,7 @@ class FastFoodBot:
             },
             "side_type": "",
             "side_size": "",
+            "drink_type": "",
             "drink_size": ""
         }
         self.order_started = False
@@ -148,8 +150,6 @@ class FastFoodBot:
             label.grid(row=1, column=i, padx=5, pady=2)
     
     def is_ordering_complete(self):
-        if not self.items_organized["drink_size"] or not self.items_organized["side_type"] or not self.items_organized["side_size"]:
-            return False
         for val in self.items_organized["burger"].values():
             if val:
                 return True
@@ -195,14 +195,10 @@ class FastFoodBot:
                 # Extract the relevant portion
                 relevant_portion = image[y1:y2, x1:x2]
 
-                for item in self.burger_items:
-                    self.items_organized["burger"][item] = 0
                 all_items = split_order_items(relevant_portion)
-                spotted_stuff = 0
                 for item in all_items:
                     item_idx = identify_ingredient(item)  # Note: now passing individual item image
                     if item_idx > -1:
-                        spotted_stuff += 1
                         # TODO: Use template matching to identify the count instead of just setting to 1.
                         self.items_organized["burger"][self.burger_items[item_idx]] = 1
 
@@ -214,13 +210,11 @@ class FastFoodBot:
             
             case 2:
                 if self.order_started:
-                    side_image = self.side_matcher.get_side_from_order(image)
-                    self.update_gui_ingredients()
-                    self.update_ingredients_to_identify([side_image])
-                    side_result = self.side_matcher.identify(side_image)
+                    side_result = detect_side(image)
+                    
                     if side_result in self.sides:
                         self.items_organized["side_type"] = side_result
-
+                    side_image = self.side_matcher.get_side_from_order(image)
                     side_size = self.side_matcher.check_size(side_image)
                     if side_size in self.sizes:
                         self.items_organized["side_size"] = side_size
@@ -230,12 +224,14 @@ class FastFoodBot:
                 for now, the bot doesn't yet handle drink types, only drink sizes. So in self.make_the_order it simply clicks on a default drink type.
                 """
                 if self.order_started:
+                    drink_type = spot_drink(image)
                     d_image = self.side_matcher.get_side_from_order(image)
                     self.update_gui_ingredients()
                     self.update_ingredients_to_identify([d_image])
                     d_size = self.side_matcher.check_size(d_image)
                     if d_size in self.sizes:
                         self.items_organized["drink_size"] = d_size
+                        self.items_organized["drink_type"] = drink_type
                 return
             case 4:
                 self.update_gui_ingredients()
@@ -243,7 +239,12 @@ class FastFoodBot:
                 if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
                 else:
-                    self.make_the_order()
+                    self.make_the_order()                
+                    for item in self.burger_items:
+                        self.items_organized["burger"][item] = 0
+                    self.items_organized["side_type"] = ""
+                    self.items_organized["side_size"] = ""
+                    self.items_organized["drink_size"] = ""
     
     def make_the_order(self):
         if self.order_in_progress:
@@ -283,8 +284,8 @@ class FastFoodBot:
         # window, and pass it to the handle_dialog function
         while self.running:
             try:
-                if time.time() - last_timestamp < 1:
-                    time.sleep(2)
+                if time.time() - last_timestamp < 0.5:
+                    time.sleep(0.5)
                 image = pyautogui.screenshot()
                 image = image.convert("RGB")
                 image_np = np.array(image)
