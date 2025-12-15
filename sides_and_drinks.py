@@ -21,19 +21,21 @@ def spot_drink(image_arr):
                 green_count += 1
             total_count += 1
     
+    dr = "milkshake"
     if orange_count / total_count > 0.02:
-        return "soda"
+        dr = "soda"
     if green_count / total_count > 0.02:
-        return "juice"
-    return "milkshake"
+        dr = "juice"
 
+    print(f"Drink detection - orange: {orange_count}, green: {green_count}, total: {total_count}, drink: {dr}")
+    return dr
 
 def detect_side(image_arr, show_region=False):
     # See if this is a french fry order.
     tlx = int(image_arr.shape[1] * 1250 / 2550)
-    tly = int(image_arr.shape[0] * 405 / 1378)
+    tly = int(image_arr.shape[0] * 395 / 1378)
     brx = int(image_arr.shape[1] * 1305 / 2550)
-    bry = int(image_arr.shape[0] * 430 / 1378)
+    bry = int(image_arr.shape[0] * 420 / 1378)
     roi = image_arr[tly:bry, tlx:brx]
 
     if show_region:

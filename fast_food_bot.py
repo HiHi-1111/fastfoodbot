@@ -101,7 +101,7 @@ class FastFoodBot:
             ingredients_text += "\n".join([f"\t\t{item}: {count}" for item, count in self.items_organized["burger"].items() if count > 0])
             ingredients_text += "\n- Side:\n"
             ingredients_text += f"\t\t{self.items_organized['side_type']}: {self.items_organized['side_size']}\n"
-            ingredients_text += f"- Drink:\n\t\t{self.items_organized['drink_size']}"
+            ingredients_text += f"- Drink:\n\t\t{self.items_organized['drink_type']}: {self.items_organized['drink_size']}\n"
         
         self.ingredients_label.config(text=ingredients_text)
 
@@ -218,6 +218,7 @@ class FastFoodBot:
                     side_size = self.side_matcher.check_size(side_image)
                     if side_size in self.sizes:
                         self.items_organized["side_size"] = side_size
+                    self.update_gui_ingredients()
                 return
             case 3:
                 """
@@ -225,19 +226,20 @@ class FastFoodBot:
                 """
                 if self.order_started:
                     drink_type = spot_drink(image)
+                    self.items_organized["drink_type"] = drink_type
                     d_image = self.side_matcher.get_side_from_order(image)
-                    self.update_gui_ingredients()
                     self.update_ingredients_to_identify([d_image])
                     d_size = self.side_matcher.check_size(d_image)
                     if d_size in self.sizes:
                         self.items_organized["drink_size"] = d_size
-                        self.items_organized["drink_type"] = drink_type
+                    self.update_gui_ingredients()
                 return
             case 4:
                 self.update_gui_ingredients()
                 self.update_ingredients_to_identify([])  # Clear section
                 if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
+                
                 else:
                     self.make_the_order()                
                     for item in self.burger_items:

@@ -400,7 +400,7 @@ def is_this_phase_2_or_3(image: np.ndarray) -> int:
 	
 	if result['text'] == 'With...':
 		return 2
-	elif result['text'] == 'And a...':
+	elif result['text'].startswith('And'):
 		return 3
 	return 0
 
