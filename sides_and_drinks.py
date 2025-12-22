@@ -1,6 +1,10 @@
 import cv2
 from time import sleep
 
+RED = 0
+GREEN = 1
+BLUE = 2
+
 def spot_drink(image_arr):
     top_left_x = int(image_arr.shape[1] * 0.47)
     top_left_y = int(image_arr.shape[0] * 0.28)
@@ -13,11 +17,11 @@ def spot_drink(image_arr):
     total_count = 0
     for row in roi:
         for px in row:
-            if px[0] > 250 and px[1] > 250 and px[2] > 250:
+            if px[BLUE] > 250 and px[GREEN] > 250 and px[RED] > 250:
                 continue
-            if px[0] < 20 and px[1] < 177 and px[2] < 233 and px[1] > 116 and px[2] > 165:
+            if px[BLUE] < 20 and px[GREEN] < 177 and px[RED] < 233 and px[GREEN] > 116 and px[RED] > 165:
                 orange_count += 1
-            if px[0] > 151 and px[1] > 211 and px[2] < 176 and px[2] > 111 and px[0] < 226 and px[2] < 176:
+            if px[BLUE] > 151 and px[GREEN] > 211 and px[RED] < 176 and px[RED] > 111 and px[BLUE] < 226 and px[RED] < 176:
                 green_count += 1
             total_count += 1
     
