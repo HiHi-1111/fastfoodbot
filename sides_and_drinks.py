@@ -51,8 +51,8 @@ def detect_side(image_arr, show_region=False):
                 non_white += 1
     total_px = roi.shape[0] * roi.shape[1]
     non_white_frac = non_white / total_px
-    if non_white_frac > 0.2:
+    if non_white_frac > 0.65:
         return "fries"
-    elif non_white_frac == 0:
+    elif non_white_frac < 0.3:
         return "onion_rings"
     return "thick_fries"
