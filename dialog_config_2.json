@@ -10,5 +10,11 @@
     "y": 300,
 	  "height": 80,
 		"width": 265
+  },
+  "side_size": {
+    "x": 1280,
+    "y": 470,
+    "width": 65,
+    "height": 65
   }
 }

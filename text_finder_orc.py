@@ -392,28 +392,26 @@ def main():
 	# ocr.calibrate_dialog_region(screenshot_path)
 
 def is_this_phase_2_or_3(image: np.ndarray) -> int:
-	print("now in phase 2/3 check....")
 	ocr = RobloxDialogOCR('dialog_config_2.json')
 	result = ocr.read_dialog_text_from_array(image)
 	if result['success']:
 		print("Read this: ", result['text'])
-	
-	if result['text'] == 'With...':
-		return 2
-	elif result['text'].startswith('And'):
-		return 3
+
+	candidates = []
+	if result.get('text'):
+		candidates.append(result['text'])
+	candidates.extend(result.get('all_results', []))
+	for raw_text in candidates:
+		normalized = re.sub(r'[^a-z]', '', raw_text.lower())
+		if not normalized:
+			continue
+		if normalized.startswith('and'):
+			return 3
+		if normalized.startswith('with') or normalized.startswith('wit'):
+			return 2
 	return 0
 
 def is_this_phase_4(image: np.ndarray) -> bool:
-# # "dialog_region": {
-# #     "x": 1086,
-# #     "y": 1342,
-# # 	  "height": 50,
-# # 		"width": 380
-# 	cv2.imshow('Dialog Region', image[1342:1392, 1086:1466])
-# 	cv2.waitKey(10000)
-# 	cv2.destroyAllWindows()
-	
 	ocr = RobloxDialogOCR('dialog_config_4.json')
 	result = ocr.read_dialog_text_from_array(image)
 

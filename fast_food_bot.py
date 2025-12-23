@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from text_finder_orc import get_current_phase
-from order_processor import split_order_items, identify_ingredient, SideMatcher
+from order_processor import split_order_items, identify_ingredient, SizeDetector
 import time
 import pyautogui
 import json
@@ -41,8 +41,10 @@ class FastFoodBot:
             },
             "side_type": "",
             "side_size": "",
+            "side_size_text": "",
             "drink_type": "",
-            "drink_size": ""
+            "drink_size": "",
+            "drink_size_text": ""
         }
         self.order_started = False
         self.running = True  # Flag to control the loop
@@ -52,7 +54,7 @@ class FastFoodBot:
         self.screen_width, self.screen_height = pyautogui.size()
 
         # For identifying side order as well as drink sizes.
-        self.side_matcher = SideMatcher("dialog_config_2.json")
+        self.side_matcher = SizeDetector("dialog_config_2.json")
 
         # GUI setup
         self.gui_root = tk.Tk()
@@ -154,6 +156,17 @@ class FastFoodBot:
             if val:
                 return True
         return False
+
+    def reset_order(self):
+        for item in self.burger_items:
+            self.items_organized["burger"][item] = 0
+        self.items_organized["side_type"] = ""
+        self.items_organized["side_size"] = ""
+        self.items_organized["side_size_text"] = ""
+        self.items_organized["drink_type"] = ""
+        self.items_organized["drink_size"] = ""
+        self.items_organized["drink_size_text"] = ""
+        self.order_started = False
         
 
     def handle_dialog(self, image: np.ndarray):
@@ -209,13 +222,22 @@ class FastFoodBot:
                 return
             
             case 2:
+                print("\nBout to read side order ...")
+                if not self.is_ordering_complete():
+                    self.select_button("can_you_repeat")
+                    self.reset_order()
+                    self.update_gui_ingredients()
+                    return
                 if self.order_started:
                     side_result = detect_side(image)
+                    print(f"\nDetected this side: {side_result}")
                     
                     if side_result in self.sides:
                         self.items_organized["side_type"] = side_result
+                    print("\nBout to check the size of the side....")
                     side_image = self.side_matcher.get_side_from_order(image)
-                    side_size = self.side_matcher.check_size(side_image)
+                    self.items_organized["side_size_text"] = self.side_matcher.read_size_text(side_image)
+                    side_size = self.side_matcher.check_size(side_image, show_image=False)
                     if side_size in self.sizes:
                         self.items_organized["side_size"] = side_size
                     self.update_gui_ingredients()
@@ -224,11 +246,17 @@ class FastFoodBot:
                 """
                 for now, the bot doesn't yet handle drink types, only drink sizes. So in self.make_the_order it simply clicks on a default drink type.
                 """
+                if not self.is_ordering_complete():
+                    self.select_button("can_you_repeat")
+                    self.reset_order()
+                    self.update_gui_ingredients()
+                    return
                 if self.order_started:
                     drink_type = spot_drink(image)
                     self.items_organized["drink_type"] = drink_type
                     d_image = self.side_matcher.get_side_from_order(image)
                     self.update_ingredients_to_identify([d_image])
+                    self.items_organized["drink_size_text"] = self.side_matcher.read_size_text(d_image)
                     d_size = self.side_matcher.check_size(d_image)
                     if d_size in self.sizes:
                         self.items_organized["drink_size"] = d_size
@@ -241,12 +269,8 @@ class FastFoodBot:
                     self.select_button("can_you_repeat")
                 
                 else:
-                    self.make_the_order()                
-                    for item in self.burger_items:
-                        self.items_organized["burger"][item] = 0
-                    self.items_organized["side_type"] = ""
-                    self.items_organized["side_size"] = ""
-                    self.items_organized["drink_size"] = ""
+                    # self.make_the_order()                
+                    self.reset_order()
     
     def make_the_order(self):
         if self.order_in_progress:
@@ -296,6 +320,7 @@ class FastFoodBot:
                 self.update_gui_screenshot(image)
                 
                 new_state = get_current_phase(image_np)
+                print(f"Now in phase: {new_state}")
                 self.customer_state = new_state
                 self.update_gui_state()
                 self.handle_dialog(image_np)
