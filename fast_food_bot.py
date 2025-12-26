@@ -67,6 +67,10 @@ class FastFoodBot:
         self.ingredients_label = tk.Label(self.gui_root, text="Current Order: None", font=("Arial", 12), justify=tk.LEFT)
         self.ingredients_label.pack(padx=20, pady=5)
 
+        # Add clear screen button
+        self.clear_button = tk.Button(self.gui_root, text="Clear Screen", command=self.clear_screen)
+        self.clear_button.pack(padx=20, pady=5)
+
         # Add screenshot display
         self.screenshot_label = tk.Label(self.gui_root)
         self.screenshot_label.pack(padx=20, pady=10)
@@ -167,6 +171,11 @@ class FastFoodBot:
         self.items_organized["drink_size"] = ""
         self.items_organized["drink_size_text"] = ""
         self.order_started = False
+
+    def clear_screen(self):
+        self.reset_order()
+        self.update_gui_ingredients()
+        self.update_ingredients_to_identify([])
         
 
     def handle_dialog(self, image: np.ndarray):

@@ -73,9 +73,12 @@ def identify_ingredient(image):
     purple = 0
     brown = 0
     veg_like = 0
+    veg_pixel_found = 0
     total_rel = image_rgb.shape[0]*image_rgb.shape[1]
     for row in image_rgb: 
         for px in row:
+            if px[1] >= 140 and px[1] >= px[0] + 20 and px[1] >= px[2] + 20 and px[0] <= 200 and px[2] <= 200:
+                veg_pixel_found += 1
             # Colors are now in RGB: px[0]=R, px[1]=G, px[2]=B
             if px[0]>240 and px[1]>230 and px[2]<140:  # Yellow: high R, high G, low B
                 yellow=yellow+1
@@ -101,6 +104,8 @@ def identify_ingredient(image):
     if purple>=0.25*total_rel:
         return 3
     if veg_like>=0.22*total_rel:
+        return 5
+    if veg_pixel_found > 0 and brown>=0.25*total_rel:
         return 5
     if brown>=0.25*total_rel:
         return 4
