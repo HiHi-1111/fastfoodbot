@@ -1,10 +1,12 @@
 import numpy as np
 import cv2
+import pytesseract
 from text_finder_orc import get_current_phase
 from order_processor import split_order_items, identify_ingredient, SizeDetector
 import time
 import pyautogui
 import json
+import re
 import math
 import threading
 import tkinter as tk
@@ -140,6 +142,71 @@ class FastFoodBot:
             fps = 1.0 / frame_time
         self.fps_label.config(text=f"FPS: {fps:.1f}")
 
+    def _extract_quantity_from_text(self, text):
+        if not text:
+            return None
+        for num_str in re.findall(r"\d+", text):
+            try:
+                value = int(num_str)
+            except ValueError:
+                continue
+            if 1 <= value <= 10:
+                return value
+        return None
+
+    def read_ingredient_quantity(self, item_image):
+        if item_image is None:
+            return None
+        if isinstance(item_image, Image.Image):
+            image_np = np.array(item_image)
+        elif isinstance(item_image, np.ndarray):
+            image_np = item_image
+        else:
+            image_np = np.array(item_image)
+
+        if len(image_np.shape) == 3:
+            if image_np.shape[2] == 4:
+                gray = cv2.cvtColor(image_np, cv2.COLOR_RGBA2GRAY)
+            else:
+                gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image_np.copy()
+
+        scale = 2
+        height, width = gray.shape[:2]
+        resized = cv2.resize(gray, (width * scale, height * scale), interpolation=cv2.INTER_CUBIC)
+        thresh = cv2.adaptiveThreshold(
+            resized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
+
+        pil_image = Image.fromarray(thresh)
+        configs = [
+            "--psm 7 -c tessedit_char_whitelist=0123456789",
+            "--psm 8 -c tessedit_char_whitelist=0123456789",
+            "--psm 13 -c tessedit_char_whitelist=0123456789",
+        ]
+        results = []
+        for config in configs:
+            try:
+                text = pytesseract.image_to_string(pil_image, config=config)
+            except Exception:
+                continue
+            quantity = self._extract_quantity_from_text(text)
+            if quantity is not None:
+                results.append(quantity)
+
+        if not results:
+            return None
+
+        counts = {}
+        for quantity in results:
+            counts[quantity] = counts.get(quantity, 0) + 1
+        best_count = max(counts.values())
+        for quantity in results:
+            if counts[quantity] == best_count:
+                return quantity
+        return None
+
     def update_ingredients_to_identify(self, item_images):
         # Clear previous images
         for widget in self.ingredients_frame.winfo_children():
@@ -151,11 +218,15 @@ class FastFoodBot:
         # Display new images in a row
         for i, item in enumerate(item_images):
             label_text = ""
+            quantity = None
             if isinstance(item, dict):
                 img = item.get("image")
                 label_text = item.get("label", "")
+                quantity = item.get("quantity")
             elif isinstance(item, tuple) and len(item) == 2:
                 img, label_text = item
+            elif isinstance(item, tuple) and len(item) == 3:
+                img, label_text, quantity = item
             else:
                 img = item
             # Convert to PIL Image if needed
@@ -177,7 +248,7 @@ class FastFoodBot:
             if label_text:
                 text_label = tk.Label(self.ingredients_frame, text=label_text, font=("Arial", 10))
                 text_label.grid(row=2, column=i, padx=5, pady=2)
-            self.phase1_identified.append({"image": img, "label": label_text})
+            self.phase1_identified.append({"image": img, "label": label_text, "quantity": quantity})
 
     def is_ordering_complete(self):
         for val in self.items_organized["burger"].values():
@@ -241,14 +312,17 @@ class FastFoodBot:
                 all_items = split_order_items(relevant_portion)
                 identified_items = []
                 for item in all_items:
+                    quantity = self.read_ingredient_quantity(item)
                     item_idx = identify_ingredient(item)  # Note: now passing individual item image
                     if item_idx > -1:
                         # TODO: Use template matching to identify the count instead of just setting to 1.
                         ingredient_name = self.burger_items[item_idx]
-                        self.items_organized["burger"][ingredient_name] = 1
+                        if quantity is None:
+                            quantity = 1
+                        self.items_organized["burger"][ingredient_name] = quantity
                     else:
                         ingredient_name = "unknown"
-                    identified_items.append({"image": item, "label": ingredient_name})
+                    identified_items.append({"image": item, "label": ingredient_name, "quantity": quantity})
 
                 # Update GUI with current ingredients
                 self.update_gui_ingredients()
