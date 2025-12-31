@@ -63,6 +63,8 @@ class FastFoodBot:
         self.gui_root = tk.Tk()
         self.gui_root.title("Fast Food Bot State")
         self.gui_root.protocol("WM_DELETE_WINDOW", self.shutdown)  # Handle window close
+        self.fps_label = tk.Label(self.gui_root, text="FPS: --", font=("Arial", 10))
+        self.fps_label.place(x=5, y=5, anchor="nw")
         self.state_label = tk.Label(self.gui_root, text=f"Current State: {self.customer_state}", font=("Arial", 16))
         self.state_label.pack(padx=20, pady=10)
 
@@ -85,6 +87,7 @@ class FastFoodBot:
         self.ingredients_heading = tk.Label(self.ingredients_frame, text="Ingredients to Identify:", font=("Arial", 12, "bold"))
         self.ingredients_heading.grid(row=0, column=0, sticky="w")
         self.ingredient_images = []  # To keep references to PhotoImages
+        self.phase1_identified = []
 
     def shutdown(self):
         """Gracefully shutdown the bot"""
@@ -130,15 +133,31 @@ class FastFoodBot:
         self.tk_screenshot = ImageTk.PhotoImage(image)
         self.screenshot_label.config(image=self.tk_screenshot)
 
+    def update_gui_fps(self, frame_time):
+        if frame_time <= 0:
+            fps = 0.0
+        else:
+            fps = 1.0 / frame_time
+        self.fps_label.config(text=f"FPS: {fps:.1f}")
+
     def update_ingredients_to_identify(self, item_images):
         # Clear previous images
         for widget in self.ingredients_frame.winfo_children():
             if widget != self.ingredients_heading:
                 widget.destroy()
         self.ingredient_images.clear()
+        self.phase1_identified = []
 
         # Display new images in a row
-        for i, img in enumerate(item_images):
+        for i, item in enumerate(item_images):
+            label_text = ""
+            if isinstance(item, dict):
+                img = item.get("image")
+                label_text = item.get("label", "")
+            elif isinstance(item, tuple) and len(item) == 2:
+                img, label_text = item
+            else:
+                img = item
             # Convert to PIL Image if needed
             if isinstance(img, np.ndarray):
                 pil_img = Image.fromarray(img)
@@ -155,7 +174,11 @@ class FastFoodBot:
 
             label = tk.Label(self.ingredients_frame, image=tk_img)
             label.grid(row=1, column=i, padx=5, pady=2)
-    
+            if label_text:
+                text_label = tk.Label(self.ingredients_frame, text=label_text, font=("Arial", 10))
+                text_label.grid(row=2, column=i, padx=5, pady=2)
+            self.phase1_identified.append({"image": img, "label": label_text})
+
     def is_ordering_complete(self):
         for val in self.items_organized["burger"].values():
             if val:
@@ -192,8 +215,6 @@ class FastFoodBot:
 
         match self.customer_state:
             case 0:
-                # Clear ingredients to identify section
-                self.update_ingredients_to_identify([])
                 return
             case 1:
                 if not self.order_started:
@@ -218,16 +239,21 @@ class FastFoodBot:
                 relevant_portion = image[y1:y2, x1:x2]
 
                 all_items = split_order_items(relevant_portion)
+                identified_items = []
                 for item in all_items:
                     item_idx = identify_ingredient(item)  # Note: now passing individual item image
                     if item_idx > -1:
                         # TODO: Use template matching to identify the count instead of just setting to 1.
-                        self.items_organized["burger"][self.burger_items[item_idx]] = 1
+                        ingredient_name = self.burger_items[item_idx]
+                        self.items_organized["burger"][ingredient_name] = 1
+                    else:
+                        ingredient_name = "unknown"
+                    identified_items.append({"image": item, "label": ingredient_name})
 
                 # Update GUI with current ingredients
                 self.update_gui_ingredients()
                 # Update GUI with images of items to identify
-                self.update_ingredients_to_identify(all_items)
+                self.update_ingredients_to_identify(identified_items)
                 return
             
             case 2:
@@ -264,7 +290,6 @@ class FastFoodBot:
                     drink_type = spot_drink(image)
                     self.items_organized["drink_type"] = drink_type
                     d_image = self.side_matcher.get_side_from_order(image)
-                    self.update_ingredients_to_identify([d_image])
                     self.items_organized["drink_size_text"] = self.side_matcher.read_size_text(d_image)
                     d_size = self.side_matcher.check_size(d_image)
                     if d_size in self.sizes:
@@ -273,7 +298,6 @@ class FastFoodBot:
                 return
             case 4:
                 self.update_gui_ingredients()
-                self.update_ingredients_to_identify([])  # Clear section
                 if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
                 
@@ -334,6 +358,8 @@ class FastFoodBot:
                 print(f"Error in main loop at phase {self.customer_state}: {e}")
             finally:
                 elapsed = time.perf_counter() - start_time
+                frame_time = max(elapsed, self.frame_interval)
+                self.update_gui_fps(frame_time)
                 sleep_time = self.frame_interval - elapsed
                 if sleep_time > 0:
                     time.sleep(sleep_time)
