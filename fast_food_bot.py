@@ -48,9 +48,12 @@ class FastFoodBot:
         }
         self.order_started = False
         self.running = True  # Flag to control the loop
+        self.last_logged_state = None
 
         # Some configs
         self.step_duraction_alpha = 0.01
+        self.target_fps = 60
+        self.frame_interval = 1.0 / self.target_fps
         self.screen_width, self.screen_height = pyautogui.size()
 
         # For identifying side order as well as drink sizes.
@@ -114,7 +117,6 @@ class FastFoodBot:
     def update_gui_screenshot(self, image):
         # Convert PIL Image to Tkinter PhotoImage and display
         if isinstance(image, np.ndarray):
-            image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
             image = Image.fromarray(image)
         elif not isinstance(image, Image.Image):
             image = Image.fromarray(np.array(image))
@@ -139,7 +141,6 @@ class FastFoodBot:
         for i, img in enumerate(item_images):
             # Convert to PIL Image if needed
             if isinstance(img, np.ndarray):
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(img)
             elif not isinstance(img, Image.Image):
                 pil_img = Image.fromarray(np.array(img))
@@ -191,7 +192,6 @@ class FastFoodBot:
 
         match self.customer_state:
             case 0:
-                time.sleep(0.5)
                 # Clear ingredients to identify section
                 self.update_ingredients_to_identify([])
                 return
@@ -314,31 +314,29 @@ class FastFoodBot:
         self.order_in_progress = False
                 
     def loop(self):
-        last_timestamp = time.time()
-        ## While the current time is within 3 seconds of the last, take a full screenshot of the 
-        # window, and pass it to the handle_dialog function
         while self.running:
+            start_time = time.perf_counter()
             try:
-                if time.time() - last_timestamp < 0.5:
-                    time.sleep(0.5)
                 image = pyautogui.screenshot()
                 image = image.convert("RGB")
                 image_np = np.array(image)
                 
-                # Always update GUI screenshot
-                self.update_gui_screenshot(image)
-                
                 new_state = get_current_phase(image_np)
-                print(f"Now in phase: {new_state}")
+                if new_state != self.last_logged_state:
+                    print(f"Now in phase: {new_state}")
+                    self.last_logged_state = new_state
                 self.customer_state = new_state
                 self.update_gui_state()
                 self.handle_dialog(image_np)
-                last_timestamp = time.time()
             except KeyboardInterrupt:
                 break
             except Exception as e:
                 print(f"Error in main loop at phase {self.customer_state}: {e}")
-                continue
+            finally:
+                elapsed = time.perf_counter() - start_time
+                sleep_time = self.frame_interval - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
     def select_button(self, ingredient_name: str):
         """
