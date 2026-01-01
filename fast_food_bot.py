@@ -2,9 +2,15 @@ import numpy as np
 import cv2
 import pytesseract
 from text_finder_orc import get_current_phase
-from order_processor import split_order_items, identify_ingredient, SizeDetector
+from order_processor import split_order_items, identify_ingredient, SizeDetector, are_we_in_an_order
 import time
 import pyautogui
+try:
+    import pydirectinput  # type: ignore
+except ImportError:
+    pydirectinput = None
+import ctypes
+from ctypes import wintypes
 import json
 import re
 import math
@@ -51,6 +57,7 @@ class FastFoodBot:
         self.order_started = False
         self.running = True  # Flag to control the loop
         self.last_logged_state = None
+        self.order_start_waited = False
 
         # Some configs
         self.step_duraction_alpha = 0.01
@@ -465,6 +472,7 @@ class FastFoodBot:
         self.select_button(self.items_organized["drink_size"])
         time.sleep(0.5)
         self.select_button("done")
+        time.sleep(3)
         self.order_in_progress = False
                 
     def loop(self):
@@ -474,8 +482,17 @@ class FastFoodBot:
                 image = pyautogui.screenshot()
                 image = image.convert("RGB")
                 image_np = np.array(image)
-                
-                new_state = get_current_phase(image_np)
+
+                in_order = are_we_in_an_order(image_np)
+                if not in_order:
+                    self.order_start_waited = False
+                    new_state = 0
+                else:
+                    if not self.order_start_waited:
+                        time.sleep(3)
+                        self.order_start_waited = True
+                        continue
+                    new_state = get_current_phase(image_np)
                 if new_state != self.last_logged_state:
                     print(f"Now in phase: {new_state}")
                     self.last_logged_state = new_state
@@ -540,11 +557,18 @@ class FastFoodBot:
                 x = (1-t)**2 * current_x + 2*(1-t)*t * (mid_x + curve_offset_x) + t**2 * target_x
                 y = (1-t)**2 * current_y + 2*(1-t)*t * (mid_y + curve_offset_y) + t**2 * target_y
                 
-                # Move mouse to calculated position
-                pyautogui.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
+            # Move mouse to calculated position
+                if pydirectinput:
+                    pydirectinput.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
+                else:
+                    pyautogui.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
             
-            # Final click at target location
-            pyautogui.doubleClick(target_x, target_y)
+            # Final left click at target location
+            if not self._send_left_click(target_x, target_y):
+                if pydirectinput:
+                    pydirectinput.click(target_x, target_y, button="left", clicks=1)
+                else:
+                    pyautogui.click(target_x, target_y, button="left")
             print(f"Selected {ingredient_name} at ({target_x}, {target_y})")
             
         except FileNotFoundError:
@@ -553,6 +577,41 @@ class FastFoodBot:
             print("Error: Invalid JSON in bot_params.json")
         except Exception as e:
             print(f"Error selecting ingredient {ingredient_name}: {e}")
+
+    def _send_left_click(self, x, y):
+        try:
+            user32 = ctypes.windll.user32
+            user32.SetCursorPos(int(x), int(y))
+            extra = ctypes.c_ulong(0)
+
+            class MOUSEINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("dx", wintypes.LONG),
+                    ("dy", wintypes.LONG),
+                    ("mouseData", wintypes.DWORD),
+                    ("dwFlags", wintypes.DWORD),
+                    ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))
+                ]
+
+            class INPUT(ctypes.Structure):
+                _fields_ = [
+                    ("type", wintypes.DWORD),
+                    ("mi", MOUSEINPUT)
+                ]
+
+            INPUT_MOUSE = 0
+            MOUSEEVENTF_LEFTDOWN = 0x0002
+            MOUSEEVENTF_LEFTUP = 0x0004
+
+            inputs = (INPUT * 2)(
+                INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, ctypes.pointer(extra))),
+                INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, ctypes.pointer(extra)))
+            )
+            user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+            return True
+        except Exception:
+            return False
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C signal"""
