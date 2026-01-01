@@ -394,7 +394,10 @@ def split_order_items(order_image):
         center_y = height // 2
         start_x = max(center_x - section_size, 0)
         start_y = max(center_y - section_size, 0)
-        final_section_bgr = order_image_bgr[start_y+(0.7*section_size):start_y + (2*section_size), start_x:start_x + (2*section_size)]
+        start_y_crop = int(start_y + (0.7 * section_size))
+        end_y_crop = int(start_y + (2 * section_size))
+        end_x_crop = int(start_x + (2 * section_size))
+        final_section_bgr = order_image_bgr[start_y_crop:end_y_crop, start_x:end_x_crop]
         if final_section_bgr.size > 0:
             # Convert to RGB for return
             final_section_rgb = cv2.cvtColor(final_section_bgr, cv2.COLOR_BGR2RGB)

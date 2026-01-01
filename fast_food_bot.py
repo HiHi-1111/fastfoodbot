@@ -57,6 +57,10 @@ class FastFoodBot:
         self.target_fps = 60
         self.frame_interval = 1.0 / self.target_fps
         self.screen_width, self.screen_height = pyautogui.size()
+        self.quantity_match_threshold = 0.78
+        self.quantity_match_scales = [0.75, 1.0, 1.25, 1.5]
+        self.quantity_templates = {}
+        self._load_quantity_templates()
 
         # For identifying side order as well as drink sizes.
         self.side_matcher = SizeDetector("dialog_config_2.json")
@@ -142,6 +146,49 @@ class FastFoodBot:
             fps = 1.0 / frame_time
         self.fps_label.config(text=f"FPS: {fps:.1f}")
 
+    def _load_quantity_templates(self):
+        template_paths = {
+            1: "images/quantity/x1.png",
+            2: "images/quantity/x2.png"
+        }
+        for quantity, path in template_paths.items():
+            template_gray = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            if template_gray is None:
+                continue
+            template_thresh = cv2.adaptiveThreshold(
+                template_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+            scaled_templates = []
+            for template in (template_gray, template_thresh):
+                for scale in self.quantity_match_scales:
+                    if scale == 1.0:
+                        resized = template
+                    else:
+                        new_w = max(int(template.shape[1] * scale), 1)
+                        new_h = max(int(template.shape[0] * scale), 1)
+                        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+                        resized = cv2.resize(template, (new_w, new_h), interpolation=interpolation)
+                    if resized.shape[0] < 4 or resized.shape[1] < 4:
+                        continue
+                    scaled_templates.append(resized)
+            self.quantity_templates[quantity] = scaled_templates
+
+    def _match_quantity_template(self, gray, thresh):
+        best_quantity = None
+        best_score = 0.0
+        targets = (gray, thresh)
+        for quantity, templates in self.quantity_templates.items():
+            for template in templates:
+                for target in targets:
+                    if target.shape[0] < template.shape[0] or target.shape[1] < template.shape[1]:
+                        continue
+                    result = cv2.matchTemplate(target, template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    if max_val > best_score:
+                        best_score = max_val
+                        best_quantity = quantity
+        return best_quantity, best_score
+
     def _extract_quantity_from_text(self, text):
         if not text:
             return None
@@ -150,7 +197,7 @@ class FastFoodBot:
                 value = int(num_str)
             except ValueError:
                 continue
-            if 1 <= value <= 10:
+            if 1 <= value <= 2:
                 return value
         return None
 
@@ -171,6 +218,15 @@ class FastFoodBot:
                 gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
         else:
             gray = image_np.copy()
+
+        thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
+
+        if self.quantity_templates:
+            quantity, score = self._match_quantity_template(gray, thresh)
+            if quantity is not None and score >= self.quantity_match_threshold:
+                return quantity
 
         scale = 2
         height, width = gray.shape[:2]
