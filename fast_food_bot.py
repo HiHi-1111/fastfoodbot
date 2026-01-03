@@ -439,7 +439,7 @@ class FastFoodBot:
                     self.select_button("can_you_repeat")
                 
                 else:
-                    # self.make_the_order()                
+                    self.make_the_order()
                     self.reset_order()
     
     def make_the_order(self):
@@ -449,29 +449,48 @@ class FastFoodBot:
         # Make the burger
         self.select_button("bottom_bun")
         time.sleep(1)
-        for item in self.items_organized["burger"]:
-            if self.items_organized["burger"][item] > 0:
-                print("clicking on ", item)
-                self.select_button(item)
-                time.sleep(1)
+        if self.phase1_identified:
+            for item in self.phase1_identified:
+                ingredient_name = item.get("label")
+                if ingredient_name in self.burger_items:
+                    quantity = item.get("quantity") or 1
+                    for _ in range(quantity):
+                        print("clicking on ", ingredient_name)
+                        self.select_button(ingredient_name)
+                        time.sleep(1)
+        else:
+            for item in self.items_organized["burger"]:
+                quantity = self.items_organized["burger"][item]
+                if quantity > 0:
+                    for _ in range(quantity):
+                        print("clicking on ", item)
+                        self.select_button(item)
+                        time.sleep(1)
         self.select_button("top_bun")
         time.sleep(1)
 
-        # Pick the fries.
-        self.select_button("side")
+        # Phase two: sides
+        self.select_button("phase_two")
         time.sleep(0.5)
-        self.select_button(self.items_organized["side_type"])
+        if self.items_organized["side_type"]:
+            self.select_button(self.items_organized["side_type"])
         time.sleep(0.5)
-        self.select_button(self.items_organized["side_size"])
+        if self.items_organized["side_size"]:
+            self.select_button(self.items_organized["side_size"])
         time.sleep(1)
-        self.select_button("drink")
+        # Phase three: drinks
+        self.select_button("phase_three")
         time.sleep(0.5)
-        # NOTE: clicking "fries" simply because the default drink shows up at the same coordinates. 
-        # First build the identification for drink types. Then select the correct drink type here.
-        self.select_button("fries")
-        self.select_button(self.items_organized["drink_size"])
+        if self.items_organized["drink_type"]:
+            self.select_button(self.items_organized["drink_type"])
+        else:
+            # NOTE: clicking "fries" simply because the default drink shows up at the same coordinates. 
+            # First build the identification for drink types. Then select the correct drink type here.
+            self.select_button("fries")
+        if self.items_organized["drink_size"]:
+            self.select_button(self.items_organized["drink_size"])
         time.sleep(0.5)
-        self.select_button("done")
+        self.select_button("green_box")
         time.sleep(3)
         self.order_in_progress = False
                 
@@ -519,20 +538,33 @@ class FastFoodBot:
             ingredient_name: Name of ingredient (e.g. 'lettuce', 'patty')
         """
         try:
+            button_aliases = {
+                "side": "phase_two",
+                "drink": "phase_three",
+                "done": "green_box"
+            }
             # Load button coordinates from JSON file
             with open('bot_params.json', 'r') as f:
                 params = json.load(f)
             
-            if ingredient_name not in params['button_coords']:
+            target_name = button_aliases.get(ingredient_name, ingredient_name)
+            target_coords = params["button_coords"].get(target_name)
+            if target_coords is None:
+                for group in params["button_coords"].values():
+                    if isinstance(group, dict) and target_name in group:
+                        target_coords = group[target_name]
+                        break
+
+            if target_coords is None:
                 print(f"Warning: {ingredient_name} not found in bot_params.json")
                 return
             
             # Get target coordinates as fractions
-            target_fraction = params['button_coords'][ingredient_name]
+            target_fraction = target_coords
             
             # Convert to actual screen coordinates
             target_x = int(target_fraction[0] * self.screen_width)
-            target_y = int(target_fraction[1] * self.screen_height)
+            target_y = int(target_fraction[1] * self.screen_height) + 25
             
             # Get current mouse position
             current_x, current_y = pyautogui.position()
