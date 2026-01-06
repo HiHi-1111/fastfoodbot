@@ -5,10 +5,6 @@ from text_finder_orc import get_current_phase
 from order_processor import split_order_items, identify_ingredient, SizeDetector, are_we_in_an_order
 import time
 import pyautogui
-try:
-    import pydirectinput  # type: ignore
-except ImportError:
-    pydirectinput = None
 import ctypes
 from ctypes import wintypes
 import json
@@ -58,6 +54,16 @@ class FastFoodBot:
         self.running = True  # Flag to control the loop
         self.last_logged_state = None
         self.order_start_waited = False
+        self.click_speed_multiplier = 1.0
+        self.click_thread = None
+        self.click_cancel_event = threading.Event()
+        self.last_phase_for_click = None
+        self.defer_clicks_until_end = True
+        self.phase1_locked = False
+        self.phase2_locked = False
+        self.phase3_locked = False
+        self.phase2_seen = False
+        self.phase3_seen = False
 
         # Some configs
         self.step_duraction_alpha = 0.01
@@ -153,6 +159,103 @@ class FastFoodBot:
             fps = 1.0 / frame_time
         self.fps_label.config(text=f"FPS: {fps:.1f}")
 
+    def _sleep_scaled(self, seconds):
+        time.sleep(seconds / self.click_speed_multiplier)
+
+    def _cancel_click_task(self):
+        if self.click_thread and self.click_thread.is_alive():
+            self.click_cancel_event.set()
+
+    def _start_click_task(self, phase):
+        self._cancel_click_task()
+        self.click_cancel_event = threading.Event()
+        if phase == 2:
+            target = lambda: self._click_phase1_sequence(self.click_cancel_event)
+        elif phase == 3:
+            target = lambda: self._click_phase2_sequence(self.click_cancel_event)
+        elif phase == 4:
+            target = lambda: self._click_phase3_sequence(self.click_cancel_event)
+        else:
+            return
+        self.click_thread = threading.Thread(target=target, daemon=True)
+        self.click_thread.start()
+
+    def _click_phase1_sequence(self, cancel_event):
+        items = [dict(item) for item in self.phase1_identified]
+        if not items:
+            for ingredient_name in self.burger_items:
+                quantity = self.items_organized["burger"].get(ingredient_name, 0)
+                if quantity > 0:
+                    items.append({"label": ingredient_name, "quantity": quantity})
+        if not items:
+            return
+        if self.customer_state != 2 or cancel_event.is_set():
+            return
+        for _ in range(3):
+            self.select_button("bottom_bun")
+            self._sleep_scaled(1)
+        for item in items:
+            if cancel_event.is_set() or self.customer_state != 2:
+                return
+            ingredient_name = item.get("label")
+            if ingredient_name not in self.burger_items:
+                continue
+            quantity = item.get("quantity") or 1
+            for _ in range(quantity):
+                if cancel_event.is_set() or self.customer_state != 2:
+                    return
+                self.select_button(ingredient_name)
+                self._sleep_scaled(1)
+        if cancel_event.is_set() or self.customer_state != 2:
+            return
+        self.select_button("top_bun")
+        self._sleep_scaled(1)
+
+    def _click_phase2_sequence(self, cancel_event):
+        if self.customer_state != 3 or cancel_event.is_set():
+            return
+        if not self.phase2_seen:
+            return
+        self.select_button("phase_two")
+        self._sleep_scaled(0.5)
+        if cancel_event.is_set() or self.customer_state != 3:
+            return
+        if self.items_organized["side_type"]:
+            self.select_button(self.items_organized["side_type"])
+        self._sleep_scaled(0.5)
+        if cancel_event.is_set() or self.customer_state != 3:
+            return
+        if self.items_organized["side_size"]:
+            self.select_button(self.items_organized["side_size"])
+        self._sleep_scaled(1)
+
+    def _click_phase3_sequence(self, cancel_event):
+        if self.customer_state != 4 or cancel_event.is_set():
+            return
+        if not self.phase3_seen:
+            return
+        self.select_button("phase_three")
+        self._sleep_scaled(0.5)
+        if cancel_event.is_set() or self.customer_state != 4:
+            return
+        if self.items_organized["drink_type"]:
+            self.select_button(self.items_organized["drink_type"])
+        else:
+            self.select_button("fries")
+        self._sleep_scaled(0.5)
+        if cancel_event.is_set() or self.customer_state != 4:
+            return
+        if self.items_organized["drink_size"]:
+            self.select_button(self.items_organized["drink_size"])
+        self._sleep_scaled(0.5)
+        if cancel_event.is_set() or self.customer_state != 4:
+            return
+        self.select_button("green_box")
+        self._sleep_scaled(3)
+        if cancel_event.is_set():
+            return
+        self.reset_order()
+
     def _load_quantity_templates(self):
         template_paths = {
             1: "images/quantity/x1.png",
@@ -207,6 +310,24 @@ class FastFoodBot:
             if 1 <= value <= 2:
                 return value
         return None
+
+    def _tomato_should_forget(self, item_image):
+        if item_image is None:
+            return False
+        if isinstance(item_image, Image.Image):
+            image_np = np.array(item_image)
+        elif isinstance(item_image, np.ndarray):
+            image_np = item_image
+        else:
+            image_np = np.array(item_image)
+
+        if image_np.ndim != 3 or image_np.shape[2] < 3:
+            return False
+
+        red = image_np[:, :, 0]
+        green = image_np[:, :, 1]
+        blue = image_np[:, :, 2]
+        return np.any((blue <= 80) & (green >= 150) & (red >= 200))
 
     def read_ingredient_quantity(self, item_image):
         if item_image is None:
@@ -329,6 +450,11 @@ class FastFoodBot:
         self.items_organized["drink_size"] = ""
         self.items_organized["drink_size_text"] = ""
         self.order_started = False
+        self.phase1_locked = False
+        self.phase2_locked = False
+        self.phase3_locked = False
+        self.phase2_seen = False
+        self.phase3_seen = False
 
     def clear_screen(self):
         self.reset_order()
@@ -344,13 +470,19 @@ class FastFoodBot:
         # Update screenshot in GUI
         self.update_gui_screenshot(image)
 
-        if self.order_in_progress:
-            return
+        if self.customer_state > 1:
+            self.phase1_locked = True
+        if self.customer_state > 2:
+            self.phase2_locked = True
+        if self.customer_state > 3:
+            self.phase3_locked = True
 
         match self.customer_state:
             case 0:
                 return
             case 1:
+                if self.phase1_locked:
+                    return
                 if not self.order_started:
                     self.order_started = True
                     self.update_gui_ingredients()  # Update GUI when order starts
@@ -380,6 +512,8 @@ class FastFoodBot:
                     if item_idx > -1:
                         # TODO: Use template matching to identify the count instead of just setting to 1.
                         ingredient_name = self.burger_items[item_idx]
+                        if ingredient_name == "tomato" and self._tomato_should_forget(item):
+                            continue
                         if quantity is None:
                             quantity = 1
                         self.items_organized["burger"][ingredient_name] = quantity
@@ -395,6 +529,9 @@ class FastFoodBot:
             
             case 2:
                 print("\nBout to read side order ...")
+                self.phase2_seen = True
+                if self.phase2_locked:
+                    return
                 if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
                     self.reset_order()
@@ -418,6 +555,9 @@ class FastFoodBot:
                 """
                 for now, the bot doesn't yet handle drink types, only drink sizes. So in self.make_the_order it simply clicks on a default drink type.
                 """
+                self.phase3_seen = True
+                if self.phase3_locked:
+                    return
                 if not self.is_ordering_complete():
                     self.select_button("can_you_repeat")
                     self.reset_order()
@@ -439,8 +579,9 @@ class FastFoodBot:
                     self.select_button("can_you_repeat")
                 
                 else:
-                    self.make_the_order()
-                    self.reset_order()
+                    if self.defer_clicks_until_end:
+                        self.make_the_order()
+                        self.reset_order()
     
     def make_the_order(self):
         if self.order_in_progress:
@@ -470,26 +611,28 @@ class FastFoodBot:
         time.sleep(1)
 
         # Phase two: sides
-        self.select_button("phase_two")
-        time.sleep(0.5)
-        if self.items_organized["side_type"]:
-            self.select_button(self.items_organized["side_type"])
-        time.sleep(0.5)
-        if self.items_organized["side_size"]:
-            self.select_button(self.items_organized["side_size"])
-        time.sleep(1)
+        if self.phase2_seen:
+            self.select_button("phase_two")
+            time.sleep(0.5)
+            if self.items_organized["side_type"]:
+                self.select_button(self.items_organized["side_type"])
+            time.sleep(0.5)
+            if self.items_organized["side_size"]:
+                self.select_button(self.items_organized["side_size"])
+            time.sleep(1)
         # Phase three: drinks
-        self.select_button("phase_three")
-        time.sleep(0.5)
-        if self.items_organized["drink_type"]:
-            self.select_button(self.items_organized["drink_type"])
-        else:
-            # NOTE: clicking "fries" simply because the default drink shows up at the same coordinates. 
-            # First build the identification for drink types. Then select the correct drink type here.
-            self.select_button("fries")
-        if self.items_organized["drink_size"]:
-            self.select_button(self.items_organized["drink_size"])
-        time.sleep(0.5)
+        if self.phase3_seen:
+            self.select_button("phase_three")
+            time.sleep(0.5)
+            if self.items_organized["drink_type"]:
+                self.select_button(self.items_organized["drink_type"])
+            else:
+                # NOTE: clicking "fries" simply because the default drink shows up at the same coordinates. 
+                # First build the identification for drink types. Then select the correct drink type here.
+                self.select_button("fries")
+            if self.items_organized["drink_size"]:
+                self.select_button(self.items_organized["drink_size"])
+            time.sleep(0.5)
         self.select_button("green_box")
         time.sleep(3)
         self.order_in_progress = False
@@ -516,6 +659,13 @@ class FastFoodBot:
                     print(f"Now in phase: {new_state}")
                     self.last_logged_state = new_state
                 self.customer_state = new_state
+                if new_state != self.last_phase_for_click:
+                    if not self.defer_clicks_until_end:
+                        if new_state in (2, 3, 4):
+                            self._start_click_task(new_state)
+                        elif new_state == 0:
+                            self._cancel_click_task()
+                    self.last_phase_for_click = new_state
                 self.update_gui_state()
                 self.handle_dialog(image_np)
             except KeyboardInterrupt:
@@ -541,7 +691,8 @@ class FastFoodBot:
             button_aliases = {
                 "side": "phase_two",
                 "drink": "phase_three",
-                "done": "green_box"
+                "done": "green_box",
+                "veg": "veg_patty"
             }
             # Load button coordinates from JSON file
             with open('bot_params.json', 'r') as f:
@@ -564,10 +715,16 @@ class FastFoodBot:
             
             # Convert to actual screen coordinates
             target_x = int(target_fraction[0] * self.screen_width)
-            target_y = int(target_fraction[1] * self.screen_height) + 25
+            target_y = int(target_fraction[1] * self.screen_height) +20  #+25
+            
+            # Debug logging for bottom_bun
+            if ingredient_name == "bottom_bun":
+                print(f"DEBUG bottom_bun - Screen size: {self.screen_width}x{self.screen_height}")
+                print(f"DEBUG bottom_bun - Fraction: {target_fraction}")
+                print(f"DEBUG bottom_bun - Calculated coords: ({target_x}, {target_y})")
             
             # Get current mouse position
-            current_x, current_y = pyautogui.position()
+            current_x, current_y = self._get_cursor_pos()
             
             # Calculate distance and number of steps for smooth movement
             distance = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
@@ -590,18 +747,13 @@ class FastFoodBot:
                 y = (1-t)**2 * current_y + 2*(1-t)*t * (mid_y + curve_offset_y) + t**2 * target_y
                 
             # Move mouse to calculated position
-                if pydirectinput:
-                    pydirectinput.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
-                else:
-                    pyautogui.moveTo(int(x), int(y), duration=self.step_duraction_alpha)
+                self._send_mouse_move_abs(int(x), int(y))
+                time.sleep(self.step_duraction_alpha / self.click_speed_multiplier)
             
             # Final left click at target location
-            if not self._send_left_click(target_x, target_y):
-                if pydirectinput:
-                    pydirectinput.click(target_x, target_y, button="left", clicks=1)
-                else:
-                    pyautogui.click(target_x, target_y, button="left")
-            print(f"Selected {ingredient_name} at ({target_x}, {target_y})")
+            time.sleep(0.1)
+            success = self._send_left_click(target_x, target_y)
+            print(f"Selected {ingredient_name} at ({target_x}, {target_y}), Click success: {success}")
             
         except FileNotFoundError:
             print("Error: bot_params.json file not found")
@@ -610,10 +762,14 @@ class FastFoodBot:
         except Exception as e:
             print(f"Error selecting ingredient {ingredient_name}: {e}")
 
-    def _send_left_click(self, x, y):
+    def _get_cursor_pos(self):
+        point = wintypes.POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+        return point.x, point.y
+
+    def _send_mouse_move_abs(self, x, y):
         try:
             user32 = ctypes.windll.user32
-            user32.SetCursorPos(int(x), int(y))
             extra = ctypes.c_ulong(0)
 
             class MOUSEINPUT(ctypes.Structure):
@@ -633,15 +789,88 @@ class FastFoodBot:
                 ]
 
             INPUT_MOUSE = 0
+            MOUSEEVENTF_MOVE = 0x0001
+            MOUSEEVENTF_ABSOLUTE = 0x8000
+            MOUSEEVENTF_VIRTUALDESK = 0x4000
+
+            virtual_x = user32.GetSystemMetrics(76)
+            virtual_y = user32.GetSystemMetrics(77)
+            virtual_w = user32.GetSystemMetrics(78)
+            virtual_h = user32.GetSystemMetrics(79)
+            target_x = int(x) - virtual_x
+            target_y = int(y) - virtual_y
+
+            if virtual_w <= 1 or virtual_h <= 1:
+                return False
+
+            abs_x = int(target_x * 65535 / (virtual_w - 1))
+            abs_y = int(target_y * 65535 / (virtual_h - 1))
+
+            inputs = (INPUT * 1)(
+                INPUT(INPUT_MOUSE, MOUSEINPUT(abs_x, abs_y, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, 0, ctypes.pointer(extra)))
+            )
+            sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+            return sent == 1
+        except Exception:
+            return False
+
+    def _send_left_click(self, x, y):
+        try:
+            user32 = ctypes.windll.user32
+            extra = ctypes.c_ulong(0)
+
+            class MOUSEINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("dx", wintypes.LONG),
+                    ("dy", wintypes.LONG),
+                    ("mouseData", wintypes.DWORD),
+                    ("dwFlags", wintypes.DWORD),
+                    ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))
+                ]
+
+            class INPUT(ctypes.Structure):
+                _fields_ = [
+                    ("type", wintypes.DWORD),
+                    ("mi", MOUSEINPUT)
+                ]
+
+            INPUT_MOUSE = 0
+            MOUSEEVENTF_MOVE = 0x0001
             MOUSEEVENTF_LEFTDOWN = 0x0002
             MOUSEEVENTF_LEFTUP = 0x0004
+            MOUSEEVENTF_ABSOLUTE = 0x8000
+            MOUSEEVENTF_VIRTUALDESK = 0x4000
 
+            virtual_x = user32.GetSystemMetrics(76)
+            virtual_y = user32.GetSystemMetrics(77)
+            virtual_w = user32.GetSystemMetrics(78)
+            virtual_h = user32.GetSystemMetrics(79)
+            target_x = int(x) - virtual_x
+            target_y = int(y) - virtual_y
+
+            if virtual_w <= 1 or virtual_h <= 1:
+                return False
+
+            abs_x = int(target_x * 65535 / (virtual_w - 1))
+            abs_y = int(target_y * 65535 / (virtual_h - 1))
+
+            # Send move and left down
             inputs = (INPUT * 2)(
-                INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, ctypes.pointer(extra))),
-                INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, ctypes.pointer(extra)))
+                INPUT(INPUT_MOUSE, MOUSEINPUT(abs_x, abs_y, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, 0, ctypes.pointer(extra))),
+                INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, ctypes.pointer(extra)))
             )
             user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
-            return True
+            
+            # Hold for 0.5 seconds
+            time.sleep(0.5)
+            
+            # Send left up
+            inputs = (INPUT * 1)(
+                INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, ctypes.pointer(extra)))
+            )
+            sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+            return sent == 1
         except Exception:
             return False
 
