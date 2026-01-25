@@ -11,6 +11,7 @@ import pytesseract
 from time import sleep
 import os
 import json
+from screen_scale import scale_box, scale_rect
 try:
     from vision.detectors import detect_size as vision_detect_size, detect_quantity as vision_detect_quantity
 except ImportError:
@@ -293,7 +294,9 @@ def detect_size_from_frame(frame_rgb, roi=(1105, 365, 1165, 425)):
     
     # Convert RGB to BGR for vision module
     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-    return vision_detect_size(frame_bgr, roi)
+    h, w = frame_bgr.shape[:2]
+    scaled_roi = scale_box(roi, w, h)
+    return vision_detect_size(frame_bgr, scaled_roi)
 
 
 def identify_drink_size(image):
@@ -307,8 +310,11 @@ def are_we_in_an_order(image):
     # Colors are now in RGB format
     # Note: Assumes image is in RGB format (from screenshots)
     red, green, blue = 101, 175, 74  # RGB values
-    x_start, y_start = 2468, 827
-    x_end, y_end = 2524, 883
+    base_box = (2468, 827, 2524, 883)
+    height, width = image.shape[:2]
+    x_start, y_start, x_end, y_end = scale_box(base_box, width, height)
+    if x_end <= x_start or y_end <= y_start:
+        return False
     green_count = 0
     total_pxls = (y_end - y_start) * (x_end - x_start)
     
@@ -467,7 +473,9 @@ class SizeDetector:
     
     def get_side_from_order(self, image):
         dims = self.crop_dims if self.crop_dims else self.default_crop_dims
-        cropped = image[dims["y"]:dims["y"]+dims["height"], dims["x"]:dims["x"]+dims["width"]]
+        height, width = image.shape[:2]
+        scaled = scale_rect(dims, width, height)
+        cropped = image[scaled["y"]:scaled["y"]+scaled["height"], scaled["x"]:scaled["x"]+scaled["width"]]
         # Image is already RGB (from screenshots), return as-is
         return cropped
 
