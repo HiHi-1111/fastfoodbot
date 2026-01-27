@@ -6,7 +6,7 @@ import re
 from typing import Tuple, Optional, List, Dict
 import json
 from order_processor import are_we_in_an_order
-from screen_scale import scale_rect
+from screen_scale import scale_rect, scale_rect_letterbox
 
 class RobloxDialogOCR:
 	def __init__(self, config_path: Optional[str] = None):
@@ -61,7 +61,7 @@ class RobloxDialogOCR:
 			Cropped dialog region
 		"""
 		height, width = image.shape[:2]
-		scaled = scale_rect(self.dialog_region, width, height)
+		scaled = scale_rect_letterbox(self.dialog_region, width, height)
 		
 		# Ensure coordinates are within image bounds
 		x = max(0, min(scaled['x'], width - 1))

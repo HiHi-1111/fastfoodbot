@@ -15,7 +15,58 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import signal
 import sys
-from sides_and_drinks import spot_drink, detect_side
+from sides_and_drinks import spot_drink, detect_side, get_phase2_icon_roi, get_phase2_last_confidence, get_phase2_last_source
+from screen_scale import scale_point_letterbox, scale_rect_letterbox
+
+MONITORINFOF_PRIMARY = 0x00000001
+
+
+def _get_primary_monitor_rect():
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    class MONITORINFOEXW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", RECT),
+            ("rcWork", RECT),
+            ("dwFlags", wintypes.DWORD),
+            ("szDevice", wintypes.WCHAR * 32),
+        ]
+
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(
+        wintypes.BOOL,
+        wintypes.HMONITOR,
+        wintypes.HDC,
+        ctypes.POINTER(RECT),
+        wintypes.LPARAM,
+    )
+
+    monitors = []
+
+    def _enum_proc(hmonitor, hdc, lprect, lparam):
+        info = MONITORINFOEXW()
+        info.cbSize = ctypes.sizeof(MONITORINFOEXW)
+        user32.GetMonitorInfoW(hmonitor, ctypes.byref(info))
+        monitors.append(info)
+        return True
+
+    user32.EnumDisplayMonitors(0, 0, MONITORENUMPROC(_enum_proc), 0)
+    for info in monitors:
+        if info.dwFlags & MONITORINFOF_PRIMARY:
+            rc = info.rcMonitor
+            return rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top
+
+    width = user32.GetSystemMetrics(0)
+    height = user32.GetSystemMetrics(1)
+    return 0, 0, width, height
 
 class FastFoodBot:
     def __init__(self):
@@ -54,7 +105,7 @@ class FastFoodBot:
         self.running = True  # Flag to control the loop
         self.last_logged_state = None
         self.order_start_waited = False
-        self.click_speed_multiplier = 1.0
+        self.click_speed_multiplier = 3
         self.click_thread = None
         self.click_cancel_event = threading.Event()
         self.last_phase_for_click = None
@@ -64,12 +115,28 @@ class FastFoodBot:
         self.phase3_locked = False
         self.phase2_seen = False
         self.phase3_seen = False
+        self.last_order_complete_at = None
+        self.phase1_roi_y_offset_ratio = -0.03
+        self.phase2_anchor_sig = None
+        self.phase2_stable_frames = 0
+        self.phase2_last_change = None
+        self.phase2_stable_required = 3
+        self.phase2_stable_timeout = 2.5
+        self.phase2_min_delay = 0.7
+        self.phase2_min_delay_required = True
+        self.phase2_enter_time = None
+        self.phase2_force_nonwhite_min = 0.12
+        self.phase2_force_contrast_min = 0.05
+        self.phase2_forced_time = None
+        self.phase2_click_multiplier = 0.2
+        self.phase3_click_multiplier = 0.2
 
         # Some configs
         self.step_duraction_alpha = 0.01
         self.target_fps = 60
         self.frame_interval = 1.0 / self.target_fps
-        self.screen_width, self.screen_height = pyautogui.size()
+        self.primary_x, self.primary_y, self.screen_width, self.screen_height = _get_primary_monitor_rect()
+        self._last_monitor_refresh = time.time()
         self.quantity_match_threshold = 0.78
         self.quantity_match_scales = [0.75, 1.0, 1.25, 1.5]
         self.quantity_templates = {}
@@ -84,6 +151,8 @@ class FastFoodBot:
         self.gui_root.protocol("WM_DELETE_WINDOW", self.shutdown)  # Handle window close
         self.fps_label = tk.Label(self.gui_root, text="FPS: --", font=("Arial", 10))
         self.fps_label.place(x=5, y=5, anchor="nw")
+        self.screen_label = tk.Label(self.gui_root, text="", font=("Arial", 10))
+        self.screen_label.place(x=5, y=22, anchor="nw")
         self.state_label = tk.Label(self.gui_root, text=f"Current State: {self.customer_state}", font=("Arial", 16))
         self.state_label.pack(padx=20, pady=10)
 
@@ -107,6 +176,13 @@ class FastFoodBot:
         self.ingredients_heading.grid(row=0, column=0, sticky="w")
         self.ingredient_images = []  # To keep references to PhotoImages
         self.phase1_identified = []
+        self.phase2_icon_label = tk.Label(self.gui_root, text="Phase 2 Icon:", font=("Arial", 12, "bold"))
+        self.phase2_icon_label.pack(padx=20, pady=(5, 0))
+        self.phase2_icon_image_label = tk.Label(self.gui_root)
+        self.phase2_icon_image_label.pack(padx=20, pady=(0, 10))
+        self.phase2_icon_image = None
+        self.base_width = 2560
+        self.base_height = 1440
 
     def shutdown(self):
         """Gracefully shutdown the bot"""
@@ -152,6 +228,19 @@ class FastFoodBot:
         self.tk_screenshot = ImageTk.PhotoImage(image)
         self.screenshot_label.config(image=self.tk_screenshot)
 
+    def update_gui_phase2_icon(self, image):
+        if image is None:
+            self.phase2_icon_image_label.config(image="")
+            return
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+        elif not isinstance(image, Image.Image):
+            image = Image.fromarray(np.array(image))
+        display_size = (80, 80)
+        image = image.resize(display_size, Image.LANCZOS)
+        self.phase2_icon_image = ImageTk.PhotoImage(image)
+        self.phase2_icon_image_label.config(image=self.phase2_icon_image)
+
     def update_gui_fps(self, frame_time):
         if frame_time <= 0:
             fps = 0.0
@@ -159,8 +248,25 @@ class FastFoodBot:
             fps = 1.0 / frame_time
         self.fps_label.config(text=f"FPS: {fps:.1f}")
 
+    def _refresh_primary_monitor(self, force=False):
+        now = time.time()
+        if not force and now - self._last_monitor_refresh < 1.0:
+            return
+        self._last_monitor_refresh = now
+        x, y, w, h = _get_primary_monitor_rect()
+        if (x, y, w, h) != (self.primary_x, self.primary_y, self.screen_width, self.screen_height):
+            self.primary_x, self.primary_y = x, y
+            self.screen_width, self.screen_height = w, h
+
+    def update_gui_screen_size(self):
+        self._refresh_primary_monitor()
+        self.screen_label.config(text=f"Screen: {self.screen_width}x{self.screen_height} @ ({self.primary_x},{self.primary_y})")
+
     def _sleep_scaled(self, seconds):
         time.sleep(seconds / self.click_speed_multiplier)
+
+    def _sleep_phase(self, seconds, phase_multiplier=1.0):
+        time.sleep(seconds / (self.click_speed_multiplier * phase_multiplier))
 
     def _cancel_click_task(self):
         if self.click_thread and self.click_thread.is_alive():
@@ -169,9 +275,9 @@ class FastFoodBot:
     def _start_click_task(self, phase):
         self._cancel_click_task()
         self.click_cancel_event = threading.Event()
-        if phase == 2:
+        if phase == 1:
             target = lambda: self._click_phase1_sequence(self.click_cancel_event)
-        elif phase == 3:
+        elif phase == 2:
             target = lambda: self._click_phase2_sequence(self.click_cancel_event)
         elif phase == 4:
             target = lambda: self._click_phase3_sequence(self.click_cancel_event)
@@ -189,27 +295,27 @@ class FastFoodBot:
                     items.append({"label": ingredient_name, "quantity": quantity})
         if not items:
             return
-        if self.customer_state != 2 or cancel_event.is_set():
+        if self.customer_state != 1 or cancel_event.is_set():
             return
         for _ in range(3):
             self.select_button("bottom_bun")
-            self._sleep_scaled(1)
+            self._sleep_scaled(0.6)
         for item in items:
-            if cancel_event.is_set() or self.customer_state != 2:
+            if cancel_event.is_set() or self.customer_state != 1:
                 return
             ingredient_name = item.get("label")
             if ingredient_name not in self.burger_items:
                 continue
             quantity = item.get("quantity") or 1
             for _ in range(quantity):
-                if cancel_event.is_set() or self.customer_state != 2:
+                if cancel_event.is_set() or self.customer_state != 1:
                     return
                 self.select_button(ingredient_name)
-                self._sleep_scaled(1)
-        if cancel_event.is_set() or self.customer_state != 2:
+                self._sleep_scaled(0.5)
+        if cancel_event.is_set() or self.customer_state != 1:
             return
         self.select_button("top_bun")
-        self._sleep_scaled(1)
+        self._sleep_scaled(0.6)
 
     def _click_phase2_sequence(self, cancel_event):
         if self.customer_state != 3 or cancel_event.is_set():
@@ -217,17 +323,17 @@ class FastFoodBot:
         if not self.phase2_seen:
             return
         self.select_button("phase_two")
-        self._sleep_scaled(0.5)
+        self._sleep_phase(0.2, self.phase2_click_multiplier)
         if cancel_event.is_set() or self.customer_state != 3:
             return
         if self.items_organized["side_type"]:
             self.select_button(self.items_organized["side_type"])
-        self._sleep_scaled(0.5)
+        self._sleep_phase(0.4, self.phase2_click_multiplier)
         if cancel_event.is_set() or self.customer_state != 3:
             return
         if self.items_organized["side_size"]:
             self.select_button(self.items_organized["side_size"])
-        self._sleep_scaled(1)
+        self._sleep_phase(0.6, self.phase2_click_multiplier)
 
     def _click_phase3_sequence(self, cancel_event):
         if self.customer_state != 4 or cancel_event.is_set():
@@ -235,23 +341,23 @@ class FastFoodBot:
         if not self.phase3_seen:
             return
         self.select_button("phase_three")
-        self._sleep_scaled(0.5)
+        self._sleep_phase(0.2, self.phase3_click_multiplier)
         if cancel_event.is_set() or self.customer_state != 4:
             return
         if self.items_organized["drink_type"]:
             self.select_button(self.items_organized["drink_type"])
         else:
             self.select_button("fries")
-        self._sleep_scaled(0.5)
+        self._sleep_phase(0.4, self.phase3_click_multiplier)
         if cancel_event.is_set() or self.customer_state != 4:
             return
         if self.items_organized["drink_size"]:
             self.select_button(self.items_organized["drink_size"])
-        self._sleep_scaled(0.5)
+        self._sleep_phase(0.4, self.phase3_click_multiplier)
         if cancel_event.is_set() or self.customer_state != 4:
             return
         self.select_button("green_box")
-        self._sleep_scaled(3)
+        self._sleep_scaled(1.5)
         if cancel_event.is_set():
             return
         self.reset_order()
@@ -460,6 +566,71 @@ class FastFoodBot:
         self.reset_order()
         self.update_gui_ingredients()
         self.update_ingredients_to_identify([])
+        self.update_gui_phase2_icon(None)
+        self._reset_phase2_stability()
+
+    def _reset_phase2_stability(self):
+        self.phase2_anchor_sig = None
+        self.phase2_stable_frames = 0
+        self.phase2_last_change = None
+
+    def _phase2_anchor_signature(self, image):
+        roi = get_phase2_icon_roi(image)
+        if roi is None or roi.size == 0:
+            return None, roi
+        if len(roi.shape) == 3:
+            gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = roi
+        sig = cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA)
+        return sig.astype(np.float32), roi
+
+    def _phase2_icon_present(self, image):
+        roi = get_phase2_icon_roi(image)
+        if roi is None or roi.size == 0:
+            return False, roi
+        if len(roi.shape) == 3:
+            gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = roi
+        non_white = float(np.mean(gray < 245))
+        contrast = float(gray.std() / 255.0)
+        return (non_white >= self.phase2_force_nonwhite_min and contrast >= self.phase2_force_contrast_min), roi
+
+    def _should_force_phase2(self, image):
+        if self.items_organized.get("side_type"):
+            return False
+        icon_present, _ = self._phase2_icon_present(image)
+        if not icon_present:
+            return False
+        ready, _ = self._phase2_panel_ready(image)
+        return bool(ready)
+
+    def _phase2_panel_ready(self, image):
+        sig, roi = self._phase2_anchor_signature(image)
+        if sig is None:
+            self._reset_phase2_stability()
+            return False, roi
+        now = time.time()
+        if self.phase2_last_change is None:
+            self.phase2_last_change = now
+        if self.phase2_anchor_sig is None:
+            self.phase2_anchor_sig = sig
+            self.phase2_stable_frames = 0
+            self.phase2_last_change = now
+            return False, roi
+
+        diff = float(np.mean(np.abs(sig - self.phase2_anchor_sig)) / 255.0)
+        if diff < 0.02:
+            self.phase2_stable_frames += 1
+        else:
+            self.phase2_stable_frames = 0
+            self.phase2_last_change = now
+            self.phase2_anchor_sig = sig
+
+        stable = self.phase2_stable_frames >= self.phase2_stable_required
+        timed_out = (now - self.phase2_last_change) >= self.phase2_stable_timeout
+        return stable or timed_out, roi
         
 
     def handle_dialog(self, image: np.ndarray):
@@ -470,8 +641,6 @@ class FastFoodBot:
         # Update screenshot in GUI
         self.update_gui_screenshot(image)
 
-        if self.customer_state > 1:
-            self.phase1_locked = True
         if self.customer_state > 2:
             self.phase2_locked = True
         if self.customer_state > 3:
@@ -489,17 +658,19 @@ class FastFoodBot:
                 height, width = image.shape[:2]
 
                 # Original coordinates were for 2560x1369 image
-                # Convert to proportions
-                x1_prop = 421/2560  # Left x coordinate
-                x2_prop = 2116/2560  # Right x coordinate
-                y1_prop = 300/1369  # Top y coordinate
-                y2_prop = 545/1369  # Bottom y coordinate
-
-                # Calculate actual coordinates for current image
-                x1 = int(width * x1_prop)
-                x2 = int(width * x2_prop)
-                y1 = int(height * y1_prop)
-                y2 = int(height * y2_prop)
+                base_rect = {
+                    "x": 421,
+                    "y": 300,
+                    "width": 2116 - 421,
+                    "height": 545 - 300,
+                }
+                scaled = scale_rect_letterbox(base_rect, width, height, base_width=2560, base_height=1369)
+                y_offset = int(height * self.phase1_roi_y_offset_ratio)
+                scaled["y"] = max(0, scaled["y"] + y_offset)
+                x1 = scaled["x"]
+                y1 = scaled["y"]
+                x2 = x1 + scaled["width"]
+                y2 = y1 + scaled["height"]
 
                 # Extract the relevant portion
                 relevant_portion = image[y1:y2, x1:x2]
@@ -525,20 +696,33 @@ class FastFoodBot:
                 self.update_gui_ingredients()
                 # Update GUI with images of items to identify
                 self.update_ingredients_to_identify(identified_items)
+                self.phase1_locked = True
+                if not self.defer_clicks_until_end:
+                    self._start_click_task(1)
                 return
             
             case 2:
                 print("\nBout to read side order ...")
                 self.phase2_seen = True
-                if self.phase2_locked:
+                if self.phase2_locked and self.items_organized["side_type"]:
+                    return
+                if self.phase2_min_delay_required and self.phase2_enter_time and (time.time() - self.phase2_enter_time) < self.phase2_min_delay:
+                    return
+                if not self.order_started:
                     return
                 if not self.is_ordering_complete():
+                    if self.phase2_forced_time and (time.time() - self.phase2_forced_time) < 3:
+                        return
                     self.select_button("can_you_repeat")
                     self.reset_order()
                     self.update_gui_ingredients()
                     return
                 if self.order_started:
+                    ready, phase2_icon = self._phase2_panel_ready(image)
+                    self.update_gui_phase2_icon(phase2_icon)
                     side_result = detect_side(image)
+                    if get_phase2_last_source() == "ai" and get_phase2_last_confidence() < 0.75:
+                        return
                     print(f"\nDetected this side: {side_result}")
                     
                     if side_result in self.sides:
@@ -559,6 +743,8 @@ class FastFoodBot:
                 if self.phase3_locked:
                     return
                 if not self.is_ordering_complete():
+                    if self.phase2_forced_time and (time.time() - self.phase2_forced_time) < 3:
+                        return
                     self.select_button("can_you_repeat")
                     self.reset_order()
                     self.update_gui_ingredients()
@@ -576,11 +762,17 @@ class FastFoodBot:
             case 4:
                 self.update_gui_ingredients()
                 if not self.is_ordering_complete():
+                    if self.last_order_complete_at and (time.time() - self.last_order_complete_at) < 5:
+                        return
+                    if self.phase2_forced_time and (time.time() - self.phase2_forced_time) < 3:
+                        return
                     self.select_button("can_you_repeat")
                 
                 else:
                     if self.defer_clicks_until_end:
                         self.make_the_order()
+                        self.reset_order()
+                    else:
                         self.reset_order()
     
     def make_the_order(self):
@@ -589,7 +781,7 @@ class FastFoodBot:
         self.order_in_progress = True
         # Make the burger
         self.select_button("bottom_bun")
-        time.sleep(1)
+        self._sleep_scaled(0.6)
         if self.phase1_identified:
             for item in self.phase1_identified:
                 ingredient_name = item.get("label")
@@ -598,7 +790,7 @@ class FastFoodBot:
                     for _ in range(quantity):
                         print("clicking on ", ingredient_name)
                         self.select_button(ingredient_name)
-                        time.sleep(1)
+                        self._sleep_scaled(0.5)
         else:
             for item in self.items_organized["burger"]:
                 quantity = self.items_organized["burger"][item]
@@ -606,24 +798,24 @@ class FastFoodBot:
                     for _ in range(quantity):
                         print("clicking on ", item)
                         self.select_button(item)
-                        time.sleep(1)
+                        self._sleep_scaled(0.5)
         self.select_button("top_bun")
-        time.sleep(1)
+        self._sleep_scaled(0.6)
 
         # Phase two: sides
         if self.phase2_seen:
             self.select_button("phase_two")
-            time.sleep(0.5)
+            self._sleep_phase(0.2, self.phase2_click_multiplier)
             if self.items_organized["side_type"]:
                 self.select_button(self.items_organized["side_type"])
-            time.sleep(0.5)
+            self._sleep_phase(0.4, self.phase2_click_multiplier)
             if self.items_organized["side_size"]:
                 self.select_button(self.items_organized["side_size"])
-            time.sleep(1)
+            self._sleep_phase(0.6, self.phase2_click_multiplier)
         # Phase three: drinks
         if self.phase3_seen:
             self.select_button("phase_three")
-            time.sleep(0.5)
+            self._sleep_phase(0.2, self.phase3_click_multiplier)
             if self.items_organized["drink_type"]:
                 self.select_button(self.items_organized["drink_type"])
             else:
@@ -632,16 +824,22 @@ class FastFoodBot:
                 self.select_button("fries")
             if self.items_organized["drink_size"]:
                 self.select_button(self.items_organized["drink_size"])
-            time.sleep(0.5)
+            self._sleep_phase(0.4, self.phase3_click_multiplier)
+        else:
+            # Ensure phase 3 gets a click even if not detected
+            self.select_button("phase_three")
+            self._sleep_phase(0.4, self.phase3_click_multiplier)
         self.select_button("green_box")
-        time.sleep(3)
+        self._sleep_scaled(1.5)
         self.order_in_progress = False
+        self.last_order_complete_at = time.time()
                 
     def loop(self):
         while self.running:
             start_time = time.perf_counter()
             try:
-                image = pyautogui.screenshot()
+                self._refresh_primary_monitor()
+                image = pyautogui.screenshot(region=(self.primary_x, self.primary_y, self.screen_width, self.screen_height))
                 image = image.convert("RGB")
                 image_np = np.array(image)
 
@@ -655,13 +853,21 @@ class FastFoodBot:
                         self.order_start_waited = True
                         continue
                     new_state = get_current_phase(image_np)
+                    if new_state == 1 and self.phase1_locked and self._should_force_phase2(image_np):
+                        new_state = 2
+                        self.phase2_forced_time = time.time()
                 if new_state != self.last_logged_state:
                     print(f"Now in phase: {new_state}")
                     self.last_logged_state = new_state
+                prev_state = self.customer_state
                 self.customer_state = new_state
+                if new_state == 2 and prev_state != 2:
+                    self.phase2_enter_time = time.time()
+                if new_state == 0 and prev_state != 0:
+                    self.clear_screen()
                 if new_state != self.last_phase_for_click:
                     if not self.defer_clicks_until_end:
-                        if new_state in (2, 3, 4):
+                        if new_state in (2, 4):
                             self._start_click_task(new_state)
                         elif new_state == 0:
                             self._cancel_click_task()
@@ -679,6 +885,7 @@ class FastFoodBot:
                 sleep_time = self.frame_interval - elapsed
                 if sleep_time > 0:
                     time.sleep(sleep_time)
+                self.update_gui_screen_size()
 
     def select_button(self, ingredient_name: str):
         """
@@ -714,12 +921,21 @@ class FastFoodBot:
             target_fraction = target_coords
             
             # Convert to actual screen coordinates
-            target_x = int(target_fraction[0] * self.screen_width)
-            target_y = int(target_fraction[1] * self.screen_height) +20  #+25
+            mapped_x, mapped_y = scale_point_letterbox(
+                target_fraction[0],
+                target_fraction[1],
+                self.screen_width,
+                self.screen_height,
+                base_width=self.base_width,
+                base_height=self.base_height,
+            )
+            target_x = self.primary_x + mapped_x
+            target_y = self.primary_y + mapped_y + 20  #+25
             
             # Debug logging for bottom_bun
             if ingredient_name == "bottom_bun":
                 print(f"DEBUG bottom_bun - Screen size: {self.screen_width}x{self.screen_height}")
+                print(f"DEBUG bottom_bun - Screen offset: ({self.primary_x}, {self.primary_y})")
                 print(f"DEBUG bottom_bun - Fraction: {target_fraction}")
                 print(f"DEBUG bottom_bun - Calculated coords: ({target_x}, {target_y})")
             
@@ -862,8 +1078,8 @@ class FastFoodBot:
             )
             user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
             
-            # Hold for 0.5 seconds
-            time.sleep(0.5)
+            # Hold briefly for click
+            time.sleep(0.2)
             
             # Send left up
             inputs = (INPUT * 1)(

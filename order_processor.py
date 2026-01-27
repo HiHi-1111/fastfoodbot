@@ -11,9 +11,9 @@ import pytesseract
 from time import sleep
 import os
 import json
-from screen_scale import scale_box, scale_rect
+from screen_scale import scale_box, scale_rect, scale_box_letterbox, scale_rect_letterbox
 try:
-    from vision.detectors import detect_size as vision_detect_size, detect_quantity as vision_detect_quantity
+    from vision.detectors import detect_size as vision_detect_size, detect_quantity as vision_detect_quantity # pyright: ignore[reportMissingImports]
 except ImportError:
     # Fallback if vision module not available
     vision_detect_size = None
@@ -310,26 +310,46 @@ def are_we_in_an_order(image):
     # Colors are now in RGB format
     # Note: Assumes image is in RGB format (from screenshots)
     red, green, blue = 101, 175, 74  # RGB values
+    tol = 18  # allow slight color variation due to scaling/blur
     base_box = (2468, 827, 2524, 883)
     height, width = image.shape[:2]
-    x_start, y_start, x_end, y_end = scale_box(base_box, width, height)
-    if x_end <= x_start or y_end <= y_start:
-        return False
-    green_count = 0
-    total_pxls = (y_end - y_start) * (x_end - x_start)
-    
+    lb_x1, lb_y1, lb_x2, lb_y2 = scale_box_letterbox(base_box, width, height, base_width=2560, base_height=1440)
+    st_x1, st_y1, st_x2, st_y2 = scale_box(base_box, width, height, base_width=2560, base_height=1440)
+
+    def _green_fraction(region):
+        if region.size == 0:
+            return 0.0
+        r = region[:, :, 0].astype(np.int16)
+        g = region[:, :, 1].astype(np.int16)
+        b = region[:, :, 2].astype(np.int16)
+        mask = (np.abs(r - red) <= tol) & (np.abs(g - green) <= tol) & (np.abs(b - blue) <= tol)
+        mask |= (g > r + 25) & (g > b + 25) & (g > 140)
+        return float(np.mean(mask))
+
     # Image from screenshots is already RGB, use as-is
     image_rgb = image
-    
-    # Fix: Properly iterate over 2D array slice
-    region = image_rgb[y_start:y_end, x_start:x_end]
-    for row in region:
-        for px in row:
-            # Colors are now in RGB: px[0]=R, px[1]=G, px[2]=B
-            if px[0] == red and px[1] == green and px[2] == blue:
-                green_count += 1
-    
-    return green_count > 0.5*total_pxls
+
+    if lb_x2 > lb_x1 and lb_y2 > lb_y1:
+        region = image_rgb[lb_y1:lb_y2, lb_x1:lb_x2]
+        if _green_fraction(region) >= 0.45:
+            return True
+
+    if st_x2 > st_x1 and st_y2 > st_y1:
+        region = image_rgb[st_y1:st_y2, st_x1:st_x2]
+        if _green_fraction(region) >= 0.45:
+            return True
+
+    # Fallback: wider scan near right side to handle stretch/position shifts
+    fx1 = int(width * 0.90)
+    fx2 = int(width * 0.995)
+    fy1 = int(height * 0.50)
+    fy2 = int(height * 0.80)
+    if fx2 > fx1 and fy2 > fy1:
+        fallback = image_rgb[fy1:fy2, fx1:fx2]
+        if _green_fraction(fallback) >= 0.12:
+            return True
+
+    return False
 
 
 def split_order_items(order_image):
@@ -474,7 +494,7 @@ class SizeDetector:
     def get_side_from_order(self, image):
         dims = self.crop_dims if self.crop_dims else self.default_crop_dims
         height, width = image.shape[:2]
-        scaled = scale_rect(dims, width, height)
+        scaled = scale_rect_letterbox(dims, width, height)
         cropped = image[scaled["y"]:scaled["y"]+scaled["height"], scaled["x"]:scaled["x"]+scaled["width"]]
         # Image is already RGB (from screenshots), return as-is
         return cropped

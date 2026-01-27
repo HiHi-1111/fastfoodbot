@@ -3,23 +3,40 @@ import numpy as np
 import os
 import time
 from time import sleep
+from screen_scale import scale_box_letterbox, scale_rect_letterbox
 
 RED = 0
 GREEN = 1
 BLUE = 2
 
-AI_CONF_THRESHOLD = 0.6
-AI_MARGIN_THRESHOLD = 0.15
+AI_CONF_THRESHOLD = 0.7
+AI_MARGIN_THRESHOLD = 0.2
 ROI_CHANGE_THRESHOLD = 0.02
 ROI_SIG_SIZE = 32
+PHASE2_ROI_PAD_RATIO = 0.2
 
 
 def _get_phase2_icon_roi(image_arr):
-    tlx = int(image_arr.shape[1] * 1250 / 2550)
-    tly = int(image_arr.shape[0] * 395 / 1378)
-    brx = int(image_arr.shape[1] * 1305 / 2550)
-    bry = int(image_arr.shape[0] * 420 / 1378)
-    return image_arr[tly:bry, tlx:brx]
+    height, width = image_arr.shape[:2]
+    base_rect = {"x": 1218, "y": 417, "width": 133, "height": 54}
+    scaled = scale_rect_letterbox(base_rect, width, height, base_width=2560, base_height=1440)
+    x1 = scaled["x"]
+    y1 = scaled["y"]
+    x2 = x1 + scaled["width"]
+    y2 = y1 + scaled["height"]
+    roi_w = max(1, x2 - x1)
+    roi_h = max(1, y2 - y1)
+    pad_x = int(roi_w * PHASE2_ROI_PAD_RATIO)
+    pad_y = int(roi_h * PHASE2_ROI_PAD_RATIO)
+    x1 = max(0, x1 - pad_x)
+    y1 = max(0, y1 - pad_y)
+    x2 = min(width, x2 + pad_x)
+    y2 = min(height, y2 + pad_y)
+    return image_arr[y1:y2, x1:x2]
+
+
+def get_phase2_icon_roi(image_arr):
+    return _get_phase2_icon_roi(image_arr)
 
 
 def _roi_signature(roi):
@@ -91,6 +108,7 @@ class _SideIconClassifier:
             img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         else:
             img_bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        img_bgr = cv2.normalize(img_bgr, None, 0, 255, cv2.NORM_MINMAX)
         if augment:
             img_bgr = cv2.GaussianBlur(img_bgr, (3, 3), 0)
         blob = cv2.dnn.blobFromImage(img_bgr, scalefactor=1.0 / 255.0, size=self._input_size)
@@ -129,13 +147,14 @@ _classifier = _SideIconClassifier()
 _last_sig = None
 _last_label = None
 _last_probs = None
+_last_confidence = 0.0
+_last_source = "unknown"
 
 def spot_drink(image_arr):
-    top_left_x = int(image_arr.shape[1] * 0.47)
-    top_left_y = int(image_arr.shape[0] * 0.28)
-    bottom_right_x = int(image_arr.shape[1] * 0.52)
-    bottom_right_y = int(image_arr.shape[0] * 0.4)
-    roi = image_arr[top_left_y:bottom_right_y, top_left_x:bottom_right_x]
+    height, width = image_arr.shape[:2]
+    base_box = (0.47, 0.28, 0.52, 0.40)
+    x1, y1, x2, y2 = scale_box_letterbox(base_box, width, height, base_width=2560, base_height=1440)
+    roi = image_arr[y1:y2, x1:x2]
 
     green_count = 0
     orange_count = 0
@@ -188,15 +207,37 @@ def detect_side(image_arr, show_region=False):
         sleep(30)
 
     sig = _roi_signature(roi)
-    if not _roi_changed(sig, _last_sig) and _last_label is not None:
+    if not _roi_changed(sig, _last_sig) and _last_label is not None and _last_label != "unknown":
         return _last_label
 
     ai_result = _classifier.predict(roi)
     if ai_result:
         if ai_result["ok"]:
+            if ai_result["confidence"] < 0.85:
+                retry = _classifier.predict(roi, augment=True)
+                if retry and retry["label"] != ai_result["label"]:
+                    _save_hard_example(roi, ai_result["probs"], ai_result["label"], "disagree")
+                    fallback_label = _detect_side_fallback_from_roi(roi)
+                    _last_sig = sig
+                    _last_label = fallback_label
+                    _last_probs = None
+                    _last_confidence = 0.0
+                    _last_source = "fallback"
+                    return fallback_label
+                fallback_label = _detect_side_fallback_from_roi(roi)
+                if fallback_label and fallback_label != ai_result["label"]:
+                    _save_hard_example(roi, ai_result["probs"], ai_result["label"], "mismatch")
+                    _last_sig = sig
+                    _last_label = fallback_label
+                    _last_probs = None
+                    _last_confidence = 0.0
+                    _last_source = "fallback"
+                    return fallback_label
             _last_sig = sig
             _last_label = ai_result["label"]
             _last_probs = ai_result["probs"]
+            _last_confidence = ai_result["confidence"]
+            _last_source = "ai"
             return _last_label
 
         retry = _classifier.predict(roi, augment=True)
@@ -204,6 +245,8 @@ def detect_side(image_arr, show_region=False):
             _last_sig = sig
             _last_label = retry["label"]
             _last_probs = retry["probs"]
+            _last_confidence = retry["confidence"]
+            _last_source = "ai"
             return _last_label
 
         reason = "lowconf" if ai_result["confidence"] < AI_CONF_THRESHOLD else "close"
@@ -213,4 +256,14 @@ def detect_side(image_arr, show_region=False):
     _last_sig = sig
     _last_label = fallback_label
     _last_probs = None
+    _last_confidence = 0.0
+    _last_source = "fallback"
     return fallback_label
+
+
+def get_phase2_last_confidence():
+    return _last_confidence
+
+
+def get_phase2_last_source():
+    return _last_source
