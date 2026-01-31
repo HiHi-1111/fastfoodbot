@@ -6,3 +6,28 @@ images/phase3
 images/quantity
 .venv*
 .vscode
+
+@"
+# generated datasets
+images/ml_dataset/
+images/synth_preview/
+
+# training outputs, checkpoints, logs
+ml_runs/
+runs/
+**/*.pt
+**/*.pth
+**/*.safetensors
+**/*.onnx
+**/*.log
+
+# python junk
+*.pyc
+
+# local environments
+.venv_gpu/
+.env
+
+# editor, OS junk
+.DS_Store
+"@ | Add-Content .gitignore
