@@ -17,8 +17,13 @@ import signal
 import sys
 from sides_and_drinks import spot_drink, detect_side, get_phase2_icon_roi, get_phase2_last_confidence, get_phase2_last_source
 from screen_scale import scale_point_letterbox, scale_rect_letterbox
+from ml_phase1_classifier import Phase1MLClassifier
 
 MONITORINFOF_PRIMARY = 0x00000001
+USE_ML_PHASE1 = True
+PHASE1_ML_CHECKPOINT = r"ml_runs\efficientnetv2_s_1769914719\best.pt"
+PHASE1_ML_CONF_THRESHOLD = 0.80
+PHASE1_ML_MARGIN_THRESHOLD = 0.12
 
 
 def _get_primary_monitor_rect():
@@ -144,6 +149,20 @@ class FastFoodBot:
         self.quantity_match_scales = [0.75, 1.0, 1.25, 1.5]
         self.quantity_templates = {}
         self._load_quantity_templates()
+
+        # Phase 1 ML classifier (ingredient type)
+        self.phase1_use_ml = USE_ML_PHASE1
+        self.phase1_classifier = None
+        self.phase1_ml_ready = False
+        if self.phase1_use_ml:
+            self.phase1_classifier = Phase1MLClassifier(
+                checkpoint_path=PHASE1_ML_CHECKPOINT,
+                device="auto",
+                img_size=224,
+                conf_threshold=PHASE1_ML_CONF_THRESHOLD,
+                margin_threshold=PHASE1_ML_MARGIN_THRESHOLD,
+            )
+            self.phase1_ml_ready = self.phase1_classifier.load()
 
         # For identifying side order as well as drink sizes.
         self.side_matcher = SizeDetector("dialog_config_2.json")
@@ -729,22 +748,60 @@ class FastFoodBot:
                 identified_items = []
                 for item in all_items:
                     quantity = self.read_ingredient_quantity(item)
-                    item_idx = identify_ingredient(item)  # Note: now passing individual item image
-                    if item_idx > -1:
-                        # TODO: Use template matching to identify the count instead of just setting to 1.
-                        ingredient_name = self.burger_items[item_idx]
-                        if ingredient_name == "tomato" and self._tomato_should_forget(item):
-                            continue
+                    ocr_text = None
+                    ocr_conf = None
+                    ml_conf = 0.0
+                    ml_top3 = []
+                    ml_reason = ""
+                    ingredient_name = "unknown"
+
+                    ml_result = None
+                    if self.phase1_use_ml and self.phase1_classifier and self.phase1_ml_ready:
+                        ml_result = self.phase1_classifier.predict(item)
+                        ml_conf = float(ml_result.get("conf") or 0.0)
+                        ml_top3 = ml_result.get("top3") or []
+                        ml_reason = ml_result.get("reason") or ""
+                        if ml_result.get("accepted") and ml_result.get("label") in self.burger_items:
+                            ingredient_name = ml_result.get("label")
+
+                    if ingredient_name == "unknown":
+                        item_idx = identify_ingredient(item)  # Note: now passing individual item image
+                        if item_idx > -1:
+                            ingredient_name = self.burger_items[item_idx]
+
+                    if ingredient_name == "tomato" and self._tomato_should_forget(item):
+                        continue
+
+                    if ingredient_name in self.burger_items:
                         if quantity is None:
                             quantity = 1
                         self.items_organized["burger"][ingredient_name] = quantity
                     else:
                         if self._phase1_should_force_unknown(item):
                             ingredient_name = "unknown"
-                            identified_items.append({"image": item, "label": ingredient_name, "quantity": quantity})
+                            identified_items.append({
+                                "image": item,
+                                "label": ingredient_name,
+                                "quantity": quantity,
+                                "confidence": ml_conf,
+                                "top3": ml_top3,
+                                "ocr_text": ocr_text,
+                                "ocr_conf": ocr_conf,
+                                "ml_reason": ml_reason,
+                            })
                             continue
                         ingredient_name = "unknown"
-                    identified_items.append({"image": item, "label": ingredient_name, "quantity": quantity})
+
+                    identified_items.append({
+                        "image": item,
+                        "label": ingredient_name,
+                        "quantity": quantity,
+                        "confidence": ml_conf,
+                        "top3": ml_top3,
+                        "ocr_text": ocr_text,
+                        "ocr_conf": ocr_conf,
+                        "ml_reason": ml_reason,
+                    })
 
                 if self.items_organized["burger"].get("patty", 0) == 0 and self.items_organized["burger"].get("veg", 0) == 0:
                     best_idx = None

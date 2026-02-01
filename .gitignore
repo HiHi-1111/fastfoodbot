@@ -1,18 +1,32 @@
-fake
-__pycache__
-types
-images/phase2
-images/phase3
-images/quantity
-.venv*
-.vscode
+# Python junk
+__pycache__/
+*.pyc
+*.pth
 
-@"
-# generated datasets
+# Virtual environments
+.venv/
+.venv_gpu/
+.venv*
+
+# IDE and OS
+.vscode
+.DS_Store
+
+# Environment files
+.env
+
+# Generated datasets and images
 images/ml_dataset/
+images/ml_dataset_phase1/
+images/ml_dataset_phase2/
+images/phase1_negatives/
+images/phase2_negatives/
+images/phase2/
+images/phase3/
+images/quantity/
 images/synth_preview/
 
-# training outputs, checkpoints, logs
+# Training outputs and checkpoints
 ml_runs/
 runs/
 **/*.pt
@@ -20,14 +34,13 @@ runs/
 **/*.safetensors
 **/*.onnx
 **/*.log
+*.log
+*.txt
 
-# python junk
-*.pyc
+# Local files and directories
+fake/
+types/
 
-# local environments
-.venv_gpu/
-.env
-
-# editor, OS junk
-.DS_Store
-"@ | Add-Content .gitignore
+# logs
+*.log
+*.txt
