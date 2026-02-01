@@ -122,7 +122,7 @@ class FastFoodBot:
         self.phase2_last_change = None
         self.phase2_stable_required = 3
         self.phase2_stable_timeout = 2.5
-        self.phase2_min_delay = 0.7
+        self.phase2_min_delay = 0.9
         self.phase2_min_delay_required = True
         self.phase2_enter_time = None
         self.phase2_force_nonwhite_min = 0.12
@@ -130,6 +130,9 @@ class FastFoodBot:
         self.phase2_forced_time = None
         self.phase2_click_multiplier = 0.2
         self.phase3_click_multiplier = 0.2
+        self.phase1_patty_fallback_threshold = 0.12
+        self.phase1_unknown_white_frac = 0.6
+        self.phase1_unknown_noise_frac = 0.45
 
         # Some configs
         self.step_duraction_alpha = 0.01
@@ -435,6 +438,53 @@ class FastFoodBot:
         blue = image_np[:, :, 2]
         return np.any((blue <= 80) & (green >= 150) & (red >= 200))
 
+    def _patty_scores(self, item_image):
+        if item_image is None:
+            return 0.0, 0.0
+        if isinstance(item_image, Image.Image):
+            image_np = np.array(item_image)
+        elif isinstance(item_image, np.ndarray):
+            image_np = item_image
+        else:
+            image_np = np.array(item_image)
+        if image_np.ndim != 3 or image_np.shape[2] < 3:
+            return 0.0, 0.0
+        red = image_np[:, :, 0]
+        green = image_np[:, :, 1]
+        blue = image_np[:, :, 2]
+        total = float(image_np.shape[0] * image_np.shape[1])
+        if total <= 0:
+            return 0.0, 0.0
+        veg_mask = (red > 120) & (red < 200) & (green > 150) & (blue < 130)
+        brown_mask = (red > 140) & (red < 180) & (green < 120) & (blue < 90)
+        veg_ratio = float(np.count_nonzero(veg_mask)) / total
+        brown_ratio = float(np.count_nonzero(brown_mask)) / total
+        return veg_ratio, brown_ratio
+
+    def _phase1_should_force_unknown(self, item_image):
+        if item_image is None:
+            return False
+        if isinstance(item_image, Image.Image):
+            image_np = np.array(item_image)
+        elif isinstance(item_image, np.ndarray):
+            image_np = item_image
+        else:
+            image_np = np.array(item_image)
+        if image_np.ndim != 3 or image_np.shape[2] < 3:
+            return False
+        total = float(image_np.shape[0] * image_np.shape[1])
+        if total <= 0:
+            return False
+        red = image_np[:, :, 0]
+        green = image_np[:, :, 1]
+        blue = image_np[:, :, 2]
+        white_mask = (red > 240) & (green > 240) & (blue > 240)
+        dark_mask = (red < 30) & (green < 30) & (blue < 30)
+        noise_mask = (~white_mask) & (~dark_mask)
+        white_frac = float(np.count_nonzero(white_mask)) / total
+        noise_frac = float(np.count_nonzero(noise_mask)) / total
+        return white_frac >= self.phase1_unknown_white_frac or noise_frac >= self.phase1_unknown_noise_frac
+
     def read_ingredient_quantity(self, item_image):
         if item_image is None:
             return None
@@ -689,8 +739,33 @@ class FastFoodBot:
                             quantity = 1
                         self.items_organized["burger"][ingredient_name] = quantity
                     else:
+                        if self._phase1_should_force_unknown(item):
+                            ingredient_name = "unknown"
+                            identified_items.append({"image": item, "label": ingredient_name, "quantity": quantity})
+                            continue
                         ingredient_name = "unknown"
                     identified_items.append({"image": item, "label": ingredient_name, "quantity": quantity})
+
+                if self.items_organized["burger"].get("patty", 0) == 0 and self.items_organized["burger"].get("veg", 0) == 0:
+                    best_idx = None
+                    best_score = 0.0
+                    best_is_veg = False
+                    for idx, item in enumerate(identified_items):
+                        if item.get("label") != "unknown":
+                            continue
+                        veg_ratio, brown_ratio = self._patty_scores(item.get("image"))
+                        score = max(veg_ratio, brown_ratio)
+                        if score > best_score:
+                            best_score = score
+                            best_idx = idx
+                            best_is_veg = veg_ratio >= brown_ratio
+                    if best_idx is not None and best_score >= self.phase1_patty_fallback_threshold:
+                        chosen = "veg" if best_is_veg else "patty"
+                        qty = identified_items[best_idx].get("quantity") or 1
+                        self.items_organized["burger"][chosen] = max(self.items_organized["burger"].get(chosen, 0), qty)
+                        identified_items[best_idx]["label"] = chosen
+                    else:
+                        self.items_organized["burger"]["patty"] = max(self.items_organized["burger"].get("patty", 0), 1)
 
                 # Update GUI with current ingredients
                 self.update_gui_ingredients()

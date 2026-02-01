@@ -444,8 +444,14 @@ class SizeDetector:
         if not hasattr(self, '_initialized'):
             # Load side images and convert from BGR (cv2.imread) to RGB for consistency
             self.side_images = {}
+            side_image_files = {
+                "fries": "long.png",
+                "thick_fries": "thick.png",
+                "onion_rings": "rings.png",
+            }
             for item in sides:
-                img_bgr = cv2.imread(f"images/sides/{item}.png")
+                filename = side_image_files.get(item, f"{item}.png")
+                img_bgr = cv2.imread(f"images/sides/{filename}")
                 if img_bgr is not None:
                     # Convert BGR to RGB for consistency with rest of codebase
                     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
