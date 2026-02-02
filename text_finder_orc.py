@@ -6,6 +6,7 @@ import re
 from typing import Tuple, Optional, List, Dict
 import json
 from order_processor import are_we_in_an_order
+from screen_scale import scale_rect, scale_rect_letterbox
 
 class RobloxDialogOCR:
 	def __init__(self, config_path: Optional[str] = None):
@@ -47,7 +48,6 @@ class RobloxDialogOCR:
 				config = json.load(f)
 				self.dialog_region = config.get('dialog_region', self.default_dialog_region)
 		except (FileNotFoundError, json.JSONDecodeError):
-			print(f"Could not load config from {config_path}, using defaults")
 			self.dialog_region = self.default_dialog_region
 	
 	def extract_dialog_region(self, image: np.ndarray) -> np.ndarray:
@@ -61,12 +61,13 @@ class RobloxDialogOCR:
 			Cropped dialog region
 		"""
 		height, width = image.shape[:2]
+		scaled = scale_rect_letterbox(self.dialog_region, width, height)
 		
 		# Ensure coordinates are within image bounds
-		x = max(0, min(self.dialog_region['x'], width - 1))
-		y = max(0, min(self.dialog_region['y'], height - 1))
-		w = min(self.dialog_region['width'], width - x)
-		h = min(self.dialog_region['height'], height - y)
+		x = max(0, min(scaled['x'], width - 1))
+		y = max(0, min(scaled['y'], height - 1))
+		w = min(scaled['width'], width - x)
+		h = min(scaled['height'], height - y)
 		
 		# Extract region
 		dialog_crop = image[y:y+h, x:x+w]
@@ -280,7 +281,7 @@ class RobloxDialogOCR:
 				'confidence': 0
 			}
 	
-	def read_dialog_text_from_array(self, image: np.ndarray, auto_detect: bool = False) -> Dict:
+	def read_dialog_text_from_array(self, image: np.ndarray, auto_detect: bool = False, show_region=False) -> Dict:
 		"""
 		Main method to extract text from a given screenshot image array (not a file path)
 		
@@ -311,12 +312,7 @@ class RobloxDialogOCR:
 					dialog_region = self.extract_dialog_region(image)
 			else:
 				dialog_region = self.extract_dialog_region(image)
-				# # display the dialog region in a gui..
-				# cv2.imshow('Dialog Region', dialog_region)
-				# cv2.waitKey(0)
-				# cv2.destroyAllWindows()
-			
-			
+		
 			# Preprocess the dialog region
 			processed_image = self.preprocess_dialog_image(dialog_region)
 			
@@ -328,6 +324,12 @@ class RobloxDialogOCR:
 			
 			# Select best result
 			final_text = self.select_best_result(ocr_results)
+
+			print("OCR Results:", ocr_results)
+			if show_region:
+				cv2.imshow("Dialog Region", dialog_region)
+				cv2.waitKey(3000)
+				cv2.destroyAllWindows()
 			
 			return {
 				'success': True,
@@ -384,7 +386,6 @@ def main():
 	result = ocr.read_dialog_text(screenshot_path)
 	
 	if result['success']:
-		print(f"Extracted text: '{result['text']}'")
 		print(f"All OCR attempts: {result['all_results']}")
 	else:
 		print(f"Error: {result['error']}")
@@ -393,34 +394,29 @@ def main():
 	# ocr.calibrate_dialog_region(screenshot_path)
 
 def is_this_phase_2_or_3(image: np.ndarray) -> int:
-	print("now in phase 2/3 check....")
 	ocr = RobloxDialogOCR('dialog_config_2.json')
 	result = ocr.read_dialog_text_from_array(image)
 	if result['success']:
 		print("Read this: ", result['text'])
-	
-	print("about to exit phase 2/3 check...")
-	if result['text'] == 'With...':
-		return 2
-	elif result['text'] == 'And a...':
-		return 3
+
+	candidates = []
+	if result.get('text'):
+		candidates.append(result['text'])
+	candidates.extend(result.get('all_results', []))
+	for raw_text in candidates:
+		normalized = re.sub(r'[^a-z]', '', raw_text.lower())
+		if not normalized:
+			continue
+		if normalized.startswith('and'):
+			return 3
+		if normalized.startswith('with') or normalized.startswith('wit'):
+			return 2
 	return 0
 
 def is_this_phase_4(image: np.ndarray) -> bool:
-	print("now in phase 4 check function....")
-# # "dialog_region": {
-# #     "x": 1086,
-# #     "y": 1342,
-# # 	  "height": 50,
-# # 		"width": 380
-# 	cv2.imshow('Dialog Region', image[1342:1392, 1086:1466])
-# 	cv2.waitKey(10000)
-# 	cv2.destroyAllWindows()
-	
 	ocr = RobloxDialogOCR('dialog_config_4.json')
 	result = ocr.read_dialog_text_from_array(image)
 
-	print("now about to exit phase 4 check....")
 	if result['success']:
 		return 'Canyourepeat?' in result['text']
 	return False
@@ -431,7 +427,6 @@ def get_current_phase(image: np.ndarray) -> int:
 	if is_this_phase_4(image):
 		return 4
 	phase_2_or_3 = is_this_phase_2_or_3(image)
-	print("now about to return 2/3/1...")
 	if (phase_2_or_3):
 		return phase_2_or_3
 	return 1
